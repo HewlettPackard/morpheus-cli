@@ -1379,7 +1379,12 @@ class Morpheus::Cli::Clusters
           (['provisionType.vmware.host', 'provisionType.scvmm.host'].include?(type['code']) && cloud['config']['hideHostSelection'] == 'on') || # should this be truthy?
           (type['fieldContext'] == 'instance.networkDomain' && type['fieldName'] == 'id')
         } rescue [])
-
+        # strip server context
+        option_type_list.each do |option_type|
+          if option_type['fieldContext'] == 'server'
+            option_type['fieldContext'] = nil
+          end
+        end
         # remove metadata option_type , prompt manually for that field 'tags' instead of 'metadata'
         #metadata_option_type = option_type_list.find {|type| type['fieldName'] == 'metadata' }
         metadata_option_type = cluster_type['optionTypes'].find {|type| type['fieldName'] == 'metadata' }
