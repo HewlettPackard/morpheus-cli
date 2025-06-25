@@ -1381,7 +1381,7 @@ class Morpheus::Cli::Clusters
         } rescue [])
         # strip server context
         option_type_list.each do |option_type|
-          if option_type['fieldContext'] == 'server'
+          if option_type['fieldContext'] == 'server' || option_type['fieldContext'] == 'domain'
             option_type['fieldContext'] = nil
           end
         end
