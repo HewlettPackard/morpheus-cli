@@ -13,7 +13,8 @@ class Morpheus::Cli::Hosts
                        {:exec => :execution_request},
                        :wiki, :update_wiki,
                        :maintenance, :leave_maintenance, :placement,
-                       :list_devices, :assign_device, :detach_device, :attach_device
+                       :list_devices, :assign_device, :detach_device, :attach_device,
+                       :snapshot
   alias_subcommand :details, :get
   set_default_subcommand :list
 
@@ -2438,6 +2439,74 @@ EOT
     render_response(json_response, options) do
       print_green_success "Maintenance mode enabled for host #{server['name']}"
       #get([server['id']])
+    end
+    return 0, nil
+  end
+
+  def snapshot(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[host]")
+      opts.on( '--name VALUE', String, "Snapshot Name. Default is server name + timestamp" ) do |val|
+        options[:options]['name'] = val
+      end
+      opts.on( '--description VALUE', String, "Snapshot Description." ) do |val|
+        options[:options]['description'] = val
+      end
+      opts.on(nil, '--memory-snapshot', "Memory Snapshot?" ) do
+        options[:memory_snapshot] = true
+      end
+      opts.on(nil, '--for-export', "For Export?" ) do
+        options[:for_export] = true
+      end
+      opts.on('--refresh [SECONDS]', String, "Refresh until execution is complete. Default interval is #{default_refresh_interval} seconds.") do |val|
+        options[:refresh_interval] = val.to_s.empty? ? default_refresh_interval : val.to_f
+      end
+      opts.on(nil, '--no-refresh', "Do not refresh" ) do
+        options[:no_refresh] = true
+      end
+      build_standard_add_options(opts, options, [:auto_confirm])
+      opts.footer = <<-EOT
+Create a snapshot for a host.
+[host] is required. This is the name or id of a host
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:1)
+    connect(options)
+    server = find_host_by_name_or_id(args[0])
+    unless options[:yes] || ::Morpheus::Cli::OptionTypes::confirm("Are you sure you would like to snapshot the host '#{server['name']}'?", options)
+      exit 1
+    end
+    payload = {}
+    if options[:payload]
+      payload = options[:payload]
+      payload.deep_merge!({'snapshot' => parse_passed_options(options)})
+    else
+      payload.deep_merge!({'snapshot' => parse_passed_options(options)})
+    end
+    payload['snapshot']['memorySnapshot'] = options[:memory_snapshot] if !options[:memory_snapshot].nil?
+    payload['snapshot']['forExport'] = options[:for_export] if !options[:for_export].nil?
+    @servers_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @servers_interface.dry.snapshot(server['id'], payload)
+      return
+    end
+    json_response = @servers_interface.snapshot(server['id'], payload)
+    render_response(json_response, options) do
+      print_green_success "Snapshot initiated."
+      process_id = json_response['processIds'][0] rescue nil
+      if process_id
+        unless options[:no_refresh]
+          process = wait_for_process_execution(process_id, options)
+          snapshot_id = process['resultId']
+          if snapshot_id
+            Morpheus::Cli::Snapshots.new.handle(["get", snapshot_id] + (options[:remote] ? ["-r",options[:remote]] : []))
+          end
+        end
+      else
+        # puts "No process returned"
+      end
     end
     return 0, nil
   end

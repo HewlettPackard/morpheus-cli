@@ -2921,6 +2921,12 @@ class Morpheus::Cli::Instances
       opts.on( '--description VALUE', String, "Snapshot Description." ) do |val|
         options[:options]['description'] = val
       end
+      opts.on(nil, '--memory-snapshot', "Memory Snapshot?" ) do
+        options[:memory_snapshot] = true
+      end
+      opts.on(nil, '--for-export', "For Export?" ) do
+        options[:for_export] = true
+      end
       opts.on('--refresh [SECONDS]', String, "Refresh until execution is complete. Default interval is #{default_refresh_interval} seconds.") do |val|
         options[:refresh_interval] = val.to_s.empty? ? default_refresh_interval : val.to_f
       end
@@ -2947,6 +2953,8 @@ EOT
     else
       payload.deep_merge!({'snapshot' => parse_passed_options(options)})
     end
+    payload['snapshot']['memorySnapshot'] = options[:memory_snapshot] if !options[:memory_snapshot].nil?
+    payload['snapshot']['forExport'] = options[:for_export] if !options[:for_export].nil?
     @instances_interface.setopts(options)
     if options[:dry_run]
       print_dry_run @instances_interface.dry.snapshot(instance['id'], payload)

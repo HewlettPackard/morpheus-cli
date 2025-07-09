@@ -212,5 +212,12 @@ class Morpheus::ServersInterface < Morpheus::APIClient
     execute(opts)
   end
 
+  def snapshot(serverId, payload = {}, params = {})
+    url = "#{@base_url}/api/servers/#{serverId}/snapshot"
+    headers = { :params => params, :authorization => "Bearer #{@access_token}", 'Content-Type' => 'application/json' }
+    opts = {method: :put, url: url, headers: headers, payload: payload.to_json}
+    execute(opts)
+  end
+
 
 end
