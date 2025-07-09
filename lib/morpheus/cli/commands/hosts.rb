@@ -3,6 +3,7 @@ require 'morpheus/cli/cli_command'
 class Morpheus::Cli::Hosts
   include Morpheus::Cli::CliCommand
   include Morpheus::Cli::AccountsHelper
+  include Morpheus::Cli::ProcessesHelper
   include Morpheus::Cli::ProvisioningHelper
   include Morpheus::Cli::LogsHelper
   set_command_name :hosts
