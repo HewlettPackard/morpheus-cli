@@ -540,8 +540,9 @@ class Morpheus::Cli::Hosts
         "Nodes" => lambda {|it| it['containers'] ? it['containers'].size : 0 },
         # "Status" => lambda {|it| format_server_status(it) },
         # "Power" => lambda {|it| format_server_power_state(it) },
-        "Status" => lambda {|it| format_server_status_friendly(it) }, # combo
-        "Managed" => lambda {|it| it['computeServerType'] ? it['computeServerType']['managed'] : ''}
+        "Managed" => lambda {|it| it['computeServerType'] ? it['computeServerType']['managed'] : ''},
+        "Instance" => lambda {|it| it['instance'] ? it['instance']['name'] : ''},
+        "Status" => lambda {|it| format_server_status_friendly(it) } # combo
       }
       server_columns.delete("Hostname") if server['hostname'].to_s.empty? || server['hostname'] == server['name']
       server_columns.delete("IP") if server['externalIp'].to_s.empty?
@@ -550,6 +551,7 @@ class Morpheus::Cli::Hosts
       server_columns.delete("Cost") if server['hourlyCost'].to_f == 0
       server_columns.delete("Price") if server['hourlyPrice'].to_f == 0 || server['hourlyPrice'] == server['hourlyCost']
       server_columns.delete("Labels") if server['labels'].nil? || server['labels'].empty?
+      server_columns.delete("Instance") if server['instance'].nil?
 
       print_description_list(server_columns, server)
 
