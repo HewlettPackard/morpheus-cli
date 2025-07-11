@@ -2047,13 +2047,18 @@ EOT
   def snapshots(args)
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
-      opts.banner = subcommand_usage("[host]")
+      opts.banner = subcommand_usage("[host] [snapshot]")
       # no pagination yet
       # build_standard_list_options(opts, options)
-      build_standard_get_options(opts, options)
+      build_standard_list_options(opts, options, [:details])
+            opts.footer = <<-EOT
+List snapshots for a host.
+[host] is required. This is the name or id of a host.
+[snapshot] is optional. This is the name or id of a snapshot.
+EOT
     end
     optparse.parse!(args)
-    verify_args!(args:args, optparse:optparse, count:1)
+    verify_args!(args:args, optparse:optparse, min:1)
     connect(options)
     begin
       server = find_host_by_name_or_id(args[0])
@@ -2065,25 +2070,52 @@ EOT
         return
       end
       json_response = @servers_interface.snapshots(server['id'], params)
-      snapshots = json_response['snapshots']      
+      snapshots = json_response['snapshots']
+      # [snapshots] is done with post api filtering by id or name or externalId
+      if args[1]
+        if args[1] =~ /\A\d{1,}\Z/
+          snapshots = snapshots.select {|it| it['id'].to_s == args[1] }
+        else
+          # match beginning of name of externalId
+          snapshots = snapshots.select {|it| it['name'].to_s.index(args[1]) == 0 || it['externalId'].to_s.index(args[1])  == 0 }
+        end
+        json_response['snapshots'] = snapshots # update response for -j filtering too
+      end
       render_response(json_response, options, 'snapshots') do
         print_h1 "Snapshots: #{server['name']}", [], options
         if snapshots.empty?
-          print cyan,"No snapshots found",reset,"\n"
+          if args[1]
+            print cyan,"No snapshots found for '#{args[1]}'",reset,"\n"
+          elsif
+            print cyan,"No snapshots found",reset,"\n"
+          end
+          print reset, "\n"
         else
-          snapshot_column_definitions = {
-            "ID" => lambda {|it| it['id'] },
-            "Name" => lambda {|it| it['name'] },
-            "Description" => lambda {|it| it['description'] },
-            # "Type" => lambda {|it| it['snapshotType'] },
-            "Date Created" => lambda {|it| format_local_dt(it['snapshotCreated']) },
-            "Status" => lambda {|it| format_snapshot_status(it) }
-          }
-          print cyan
-          print as_pretty_table(snapshots, snapshot_column_definitions.upcase_keys!, options)
-          print_results_pagination({size: snapshots.size, total: snapshots.size})
+          if options[:details]
+            # this actually makes a request for each one here so don't go crazy... 
+            if snapshots.size > 3
+              print cyan, "Showing first 3 snapshots. Use the ID to get more details.", reset, "\n"
+              snapshots = snapshots.first(3)
+            end
+            snapshots.each do |snapshot|
+              Morpheus::Cli::Snapshots.new.handle(["get", snapshot['id']] + (options[:remote] ? ["-r",options[:remote]] : []))
+            end
+          else
+            # Snapshots List
+            snapshot_column_definitions = {
+              "ID" => lambda {|it| it['id'] },
+              "Name" => lambda {|it| it['name'] },
+              "Description" => lambda {|it| it['description'] },
+              # "Type" => lambda {|it| it['snapshotType'] },
+              "Date Created" => lambda {|it| format_local_dt(it['snapshotCreated']) },
+              "Status" => lambda {|it| format_snapshot_status(it) }
+            }
+            print cyan
+            print as_pretty_table(snapshots, snapshot_column_definitions.upcase_keys!, options)
+            print_results_pagination({size: snapshots.size, total: snapshots.size})
+            print reset, "\n"
+          end
         end
-        print reset, "\n"
       end
       return 0
     rescue RestClient::Exception => e
@@ -2450,17 +2482,17 @@ EOT
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[host]")
-      opts.on( '--name VALUE', String, "Snapshot Name. Default is server name + timestamp" ) do |val|
+      opts.on( '--name VALUE', String, "Snapshot Name. Default is \"{name}.{timestamp}\"" ) do |val|
         options[:options]['name'] = val
       end
       opts.on( '--description VALUE', String, "Snapshot Description." ) do |val|
         options[:options]['description'] = val
       end
-      opts.on(nil, '--memory-snapshot', "Memory Snapshot?" ) do
-        options[:memory_snapshot] = true
+      opts.on('--memory-snapshot [on|off]', String, "Memory Snapshot? Whether to include the memory state in the snapshot.") do |val|
+        options[:options]['memorySnapshot'] = val.to_s == '' || val.to_s == 'on' || val.to_s == 'true'
       end
-      opts.on(nil, '--for-export', "For Export?" ) do
-        options[:for_export] = true
+      opts.on('--for-export [on|off]', String, "For Export? Indicates the snapshot is intended for export to storage.") do |val|
+        options[:options]['forExport'] = val.to_s == '' || val.to_s == 'on' || val.to_s == 'true'
       end
       opts.on('--refresh [SECONDS]', String, "Refresh until execution is complete. Default interval is #{default_refresh_interval} seconds.") do |val|
         options[:refresh_interval] = val.to_s.empty? ? default_refresh_interval : val.to_f
@@ -2478,18 +2510,38 @@ EOT
     verify_args!(args:args, optparse:optparse, count:1)
     connect(options)
     server = find_host_by_name_or_id(args[0])
-    unless options[:yes] || ::Morpheus::Cli::OptionTypes::confirm("Are you sure you would like to snapshot the host '#{server['name']}'?", options)
-      exit 1
-    end
     payload = {}
     if options[:payload]
       payload = options[:payload]
       payload.deep_merge!({'snapshot' => parse_passed_options(options)})
     else
       payload.deep_merge!({'snapshot' => parse_passed_options(options)})
+      # prompt for name and description
+      name = prompt_value({'fieldName' => 'name', 'type' => 'text', 'fieldLabel' => 'Snapshot Name', 'description' => "Snapshot Name. Default is \"{name}.{timestamp}\""}, options)
+      payload['snapshot']['name'] = name if !name.to_s.empty?
+      description = prompt_value({'fieldName' => 'description', 'type' => 'text', 'fieldLabel' => 'Description', 'description' => "Snapshot Description."}, options)
+      payload['snapshot']['description'] = description if !description.to_s.empty?
+      # need to GET provision type for some settings...
+      provision_type = nil
+      begin
+        provision_type_id = server['computeServerType']['provisionTypeId'] rescue nil
+        if provision_type_id
+          provision_type = @provision_types_interface.get(provision_type_id)['provisionType']
+        end
+      rescue => ex
+        Morpheus::Logging::DarkPrinter.puts "Failed to load provision type!" if Morpheus::Logging.debug?
+      end
+      if provision_type && provision_type['hasMemorySnapshots']
+        # prompt for memorySnapshot
+        memory_snapshot = prompt_value({'fieldName' => 'memorySnapshot', 'type' => 'checkbox', 'fieldLabel' => 'Memory Snapshot?', 'description' => "Snapshot Description."}, options)
+        payload['snapshot']['memorySnapshot'] = memory_snapshot if !memory_snapshot.to_s.empty?
+      end
+      # convert "on" and "off" to true/false
+      payload.booleanize!
     end
-    payload['snapshot']['memorySnapshot'] = options[:memory_snapshot] if !options[:memory_snapshot].nil?
-    payload['snapshot']['forExport'] = options[:for_export] if !options[:for_export].nil?
+    unless options[:yes] || ::Morpheus::Cli::OptionTypes::confirm("Are you sure you would like to snapshot the host '#{server['name']}'?", options)
+      exit 1
+    end
     @servers_interface.setopts(options)
     if options[:dry_run]
       print_dry_run @servers_interface.dry.snapshot(server['id'], payload)

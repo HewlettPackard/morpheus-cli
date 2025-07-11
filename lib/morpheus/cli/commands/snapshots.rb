@@ -77,11 +77,15 @@ class Morpheus::Cli::Snapshots
         "Snapshot Type" => 'snapshotType',
         "Cloud" => lambda {|it| format_name_and_id(it['zone']) },
         "Datastore" => lambda {|it| format_name_and_id(it['datastore']) },
+        "Memory Snapshot" => lambda {|it| format_boolean(it['memorySnapshot']) },
+        "For Export" => lambda {|it| format_boolean(it['forExport']) },
         "Parent Snapshot" => lambda {|it| format_name_and_id(it['parentSnapshot']) },
         "Active" => lambda {|it| format_boolean(it['currentlyActive']) },
         "Date Created" => lambda {|it| format_local_dt(it['dateCreated']) },
         "Status" => lambda {|it| format_snapshot_status(it) }
       }
+      description_cols.delete("Memory Snapshot") if !snapshot['memorySnapshot']
+      description_cols.delete("For Export") if !snapshot['forExport']
       print_description_list(description_cols, snapshot)
 
       print reset, "\n"
