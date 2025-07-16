@@ -23,6 +23,19 @@ class Morpheus::FileCopyRequestInterface < Morpheus::APIClient
     execute(method: :post, url: url, headers: headers, payload: payload)
   end
 
+  def add(local_file, params={})
+    # puts "upload_file #{local_file} to destination #{destination}"
+    if !local_file.kind_of?(File)
+      local_file = File.new(local_file, 'rb')
+    end
+    url = "#{@base_url}/api/file-copy-request/add"
+    headers = { :params => params, :authorization => "Bearer #{@access_token}", 'Content-Type' => 'application/octet-stream'}
+    headers[:params][:filename] = File.basename(local_file)
+    payload = local_file
+    headers['Content-Length'] = local_file.size # File.size(local_file)
+    execute(method: :post, url: url, headers: headers, payload: payload)
+  end
+
   def execute_against_lease(id, local_file, params)
     # puts "upload_file #{local_file} to destination #{destination}"
     if !local_file.kind_of?(File)

@@ -5,7 +5,7 @@ class Morpheus::Cli::FileCopyRequestCommand
 
   set_command_name :'file-copy-request'
 
-  register_subcommands :get, :execute, :download
+  register_subcommands :get, :execute, :download, :add
   #register_subcommands :'execute-against-lease' => :execute_against_lease
   
   # set_default_subcommand :list
@@ -330,6 +330,106 @@ class Morpheus::Cli::FileCopyRequestCommand
         return 1
       end
 
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def add(args)
+    options = {}
+    params = {}
+    script_content = nil
+    do_refresh = true
+    filename = nil
+    optparse = Morpheus::Cli::OptionParser.new do|opts|
+      opts.banner = subcommand_usage("[options]")
+      opts.on('--server ID', String, "Server ID") do |val|
+        params['serverId'] = val
+      end
+      opts.on('--instance ID', String, "Instance ID") do |val|
+        params['instanceId'] = val
+      end
+      opts.on('--container ID', String, "Container ID") do |val|
+        params['containerId'] = val
+      end
+      opts.on('--file FILE', "Local file to be copied." ) do |val|
+        filename = val
+      end
+      opts.on('--target-path PATH', "Target path for file on destination host." ) do |val|
+        params['targetPath'] = val
+      end
+      opts.on(nil, '--no-refresh', "Do not refresh until finished" ) do
+        do_refresh = false
+      end
+      #build_option_type_options(opts, options, add_user_source_option_types())
+      build_common_options(opts, options, [:options, :json, :dry_run, :quiet, :remote])
+      opts.footer = "Create a file copy request to be later used." + "\n" +
+                    "[server] or [instance] or [container] is required. This is the id of a server, instance or container." + "\n" +
+                    "[file] is required. This is the local filename that is to be copied." + "\n" +
+                    "[target-path] is required. This is the target path for the file on the destination host."
+    end
+    optparse.parse!(args)
+    connect(options)
+    if args.count != 0
+      print_error Morpheus::Terminal.angry_prompt
+      puts_error  "wrong number of arguments, expected 0 and got (#{args.count}) #{args.inspect}\n#{optparse}"
+      return 1
+    end
+    if params['serverId'].nil? && params['instanceId'].nil? && params['containerId'].nil?
+      puts_error "#{Morpheus::Terminal.angry_prompt}missing required option: --server or --instance or --container\n#{optparse}"
+      return 1
+    end
+    # if filename.nil?
+    #   puts_error "#{Morpheus::Terminal.angry_prompt}missing required option: --file\n#{optparse}"
+    #   return 1
+    # end
+    # if params['targetPath'].nil?
+    #   puts_error "#{Morpheus::Terminal.angry_prompt}missing required option: --target-path\n#{optparse}"
+    #   return 1
+    # end
+    begin
+      # construct payload
+      params.deep_merge!(options[:options].reject {|k,v| k.is_a?(Symbol) }) if options[:options]
+      full_filename = nil
+      if filename.nil?
+        v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'file', 'type' => 'file', 'fieldLabel' => 'File', 'required' => true, 'description' => 'The local file to be copied'}], options[:options])
+        filename = v_prompt['file']
+      end
+      full_filename = File.expand_path(filename)
+      if !File.exist?(full_filename)
+        print_red_alert "File not found: #{full_filename}"
+        return 1
+      end
+      local_file = File.new(full_filename, 'rb')
+
+      if params['targetPath'].nil?
+        v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'targetPath', 'type' => 'text', 'fieldLabel' => 'Target Path', 'required' => true, 'description' => 'The target path for the file on the destination host.'}], options[:options])
+        params['targetPath'] = v_prompt['targetPath']
+      end
+
+      @file_copy_request_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @file_copy_request_interface.dry.add(local_file, params)
+        return 0
+      end
+      # do it
+      json_response = @file_copy_request_interface.add(local_file, params)
+      # print and return result
+      if options[:quiet]
+        return 0
+      elsif options[:json]
+        puts as_json(json_response, options)
+        return 0
+      end
+      file_copy_request = json_response['fileCopyRequest']
+      print_green_success "Adding file copy request #{file_copy_request['uniqueId']}"
+      if do_refresh
+        get([file_copy_request['uniqueId'], "--refresh"])
+      else
+        get([file_copy_request['uniqueId']])
+      end
+      return 0
     rescue RestClient::Exception => e
       print_rest_exception(e, options)
       exit 1
