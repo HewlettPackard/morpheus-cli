@@ -76,13 +76,13 @@ class Morpheus::Cli::FileCopyRequestCommand
         if options[:refresh_interval].nil? || options[:refresh_interval].to_f < 0
           options[:refresh_interval] = default_refresh_interval
         end
-        if ['complete','failed','expired'].include?(file_copy_request['status'])
+        if ['complete', 'failed', 'expired', 'pending'].include?(file_copy_request['status'])
           # it is finished
         else
           print cyan
           refresh_display_seconds = options[:refresh_interval] % 1.0 == 0 ? options[:refresh_interval].to_i : options[:refresh_interval]
           print "File copy request has not yet finished. Refreshing every #{refresh_display_seconds} seconds"
-          while !['complete','failed','expired'].include?(file_copy_request['status']) do
+          while !['complete', 'failed', 'expired', 'pending'].include?(file_copy_request['status']) do
             sleep(options[:refresh_interval])
             print cyan,".",reset
             json_response = @file_copy_request_interface.get(file_copy_request_id, params)
@@ -425,6 +425,7 @@ class Morpheus::Cli::FileCopyRequestCommand
       file_copy_request = json_response['fileCopyRequest']
       print_green_success "Adding file copy request #{file_copy_request['uniqueId']}"
       if do_refresh
+        puts "THIS IS THE NEW REQUEST ID: #{file_copy_request['uniqueId']}"
         get([file_copy_request['uniqueId'], "--refresh"])
       else
         get([file_copy_request['uniqueId']])
