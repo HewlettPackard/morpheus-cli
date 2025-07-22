@@ -11,6 +11,7 @@ class Morpheus::Cli::Clouds
   alias_subcommand :'get-type', :type
   register_subcommands :wiki, :update_wiki
   register_subcommands({:'update-logo' => :update_logo,:'update-dark-logo' => :update_dark_logo})
+  register_subcommands :list_affinity_groups, :get_affinity_group, :update_affinity_group, :add_affinity_group, :remove_affinity_group
   #register_subcommands :firewall_disable, :firewall_enable
   alias_subcommand :details, :get
   set_default_subcommand :list
@@ -1149,6 +1150,331 @@ EOT
     end
   end
 
+  def list_affinity_groups(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage( "[cloud]")
+      build_standard_list_options(opts, options)
+      opts.footer = "List affinity groups for a cloud.\n" +
+          "[cloud] is required. This is the name or id of an existing cloud."
+    end
+
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:1)
+    connect(options)
+    
+    cloud = find_cloud_by_name_or_id(args[0])
+    return 1 if cloud.nil?
+    params = {}
+    params.merge!(parse_list_options(options))
+    json_response = @clouds_interface.list_affinity_groups(cloud['id'], params)
+    render_response(json_response, options, 'affinityGroups') do
+      affinity_groups = json_response['affinityGroups']
+      print_h1 "Morpheus Cloud Affinity Groups: #{cloud['name']}", parse_list_subtitles(options)
+      if affinity_groups.empty?
+        print cyan,"No affinity groups found.",reset,"\n"
+      else          
+        columns = {
+          "ID" => 'id',
+          "Name" => 'name',
+          "Type" => lambda {|it| format_affinity_type(it['affinityType']) },
+          "Resource Pool" => lambda {|it| it['pool'] ? (it['pool']['name'] || it['pool']['id']) : '' },
+          "Visibility" => lambda {|it| it['visibility'].to_s.capitalize },
+          # "Servers" => lambda {|it| it['serverCount'] },
+          # "Source" => lambda {|it| it['source'] },
+        }.upcase_keys!
+        print as_pretty_table(affinity_groups, columns, options)
+        print_results_pagination(json_response)
+      end
+      print reset,"\n"
+    end
+    return 0, nil
+  end
+
+  def get_affinity_group(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage( "[cloud] [affinity group]")
+      build_standard_get_options(opts, options)
+      opts.footer = "Get details about a cloud affinity group.\n" +
+          "[cloud] is required. This is the name or id of an existing cloud.\n" +
+          "[affinity group] is required. This is the name or id of an existing affinity group."
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:2)
+    connect(options)
+
+    cloud = find_cloud_by_name_or_id(args[0])
+    return 1 if cloud.nil?
+    # this finds the affinity group in the cloud api response, then fetches it by ID
+    affinity_group = find_cloud_affinity_group_by_name_or_id(cloud['id'], args[1])
+    if affinity_group.nil?
+      print_red_alert "Affinity Group not found for '#{args[1]}'"
+      exit 1
+    end
+
+    params = {}
+    params.merge!(parse_query_options(options))
+    @clouds_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @clouds_interface.dry.get_affinity_group(cloud['id'], affinity_group['id'], params)
+      return
+    end
+    json_response = @clouds_interface.get_affinity_group(cloud['id'], affinity_group['id'], params)
+    render_response(json_response, options, 'affinityGroup') do
+      affinity_group = json_response['affinityGroup']
+      print_h1 "Affinity Group Details", [], options
+      columns = {
+        "ID" => 'id',
+        "Name" => 'name',
+        "Type" => lambda {|it| format_affinity_type(it['affinityType']) },
+        "Resource Pool" => lambda {|it| it['pool'] ? (it['pool']['name'] || it['pool']['id']) : '' },
+        "Visibility" => lambda {|it| it['visibility'].to_s.capitalize },
+        "Servers" => lambda {|it| it['servers'].size() },
+        "Source" => lambda {|it| it['source'] },
+        "Active" => lambda {|it| format_boolean(it['active']) },
+      }
+      print_description_list(columns, affinity_group)
+      if affinity_group['servers'].size > 0
+        print_h2 "Servers", options
+        print as_pretty_table(affinity_group['servers'], [:id, :name], options)
+      end
+      print reset,"\n"
+    end
+    return 0, nil
+      
+  end
+
+  def add_affinity_group(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage( "[cloud] [name] [options]")
+      build_option_type_options(opts, options, add_cloud_affinity_group_option_types)
+      # opts.on('--refresh [SECONDS]', String, "Refresh until execution is complete. Default interval is #{default_refresh_interval} seconds.") do |val|
+      #   options[:refresh_interval] = val.to_s.empty? ? default_refresh_interval : val.to_f
+      # end
+      # opts.on(nil, '--no-refresh', "Do not refresh" ) do
+      #   options[:no_refresh] = true
+      # end
+      build_standard_add_options(opts, options)
+      opts.footer = "Add affinity group to a cloud.\n" +
+        "[cloud] is required. This is the name or id of an existing cloud.\n" +
+        "[name] is required. This is the name of the new affinity group."
+    end
+
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, min:1, max:2)
+    connect(options)
+
+    begin
+      cloud = find_cloud_by_name_or_id(args[0])
+      return 1 if cloud.nil?
+      if args[1]
+        options[:options]['name']  = args[1]
+      end
+      if options[:payload]
+        payload = options[:payload]
+        # support -O OPTION switch on top of --payload
+        if options[:options]
+          payload ||= {}
+          payload.deep_merge!(options[:options].reject {|k,v| k.is_a?(Symbol) })
+        end
+      else
+        options[:params] ||= {}
+        options[:params].merge!({:cloudId => cloud['id'],:zoneId => cloud['id']})
+        option_types = add_cloud_affinity_group_option_types
+        affinity_group = Morpheus::Cli::OptionTypes.prompt(option_types, options[:options], @api_client, options[:params])
+
+        # affinity_group_type = find_affinity_group_type_by_code(affinity_group['affinityGroupType'])
+        # affinity_group['affinityGroupType'] = {id:affinity_group_type['id']}
+
+        # # affinity_group type options
+        # unless affinity_group_type['optionTypes'].empty?
+        #   affinity_group.merge!(Morpheus::Cli::OptionTypes.prompt(affinity_group_type['optionTypes'], options[:options].deep_merge({:context_map => {'domain' => ''}, :checkbox_as_boolean => true}), @api_client, options[:params]))
+        # end
+
+        # perms
+        perms = prompt_permissions(options.merge({:for_affinity_group => true}), ['plans', 'groupDefaults'])
+
+        affinity_group['resourcePermissions'] = perms['resourcePermissions'] unless perms['resourcePermissions'].nil?
+        affinity_group['tenants'] = perms['tenantPermissions'] unless perms['tenantPermissions'].nil?
+        affinity_group['visibility'] = perms['resourcePool']['visibility'] if !perms['resourcePool'].nil? && !perms['resourcePool']['visibility'].nil?
+
+        payload = {'affinityGroup' => affinity_group}
+      end
+
+      @clouds_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @clouds_interface.dry.create_affinity_group(cloud['id'], payload)
+        return
+      end
+      json_response = @clouds_interface.create_affinity_group(cloud['id'], payload)
+      if options[:json]
+        puts as_json(json_response)
+      else
+        if json_response['success']
+          if json_response['msg'] == nil
+            print_green_success "Adding affinity group to cloud #{cloud['name']}"
+          else
+            print_green_success json_response['msg']
+          end
+          execution_id = json_response['executionId']
+          if !options[:no_refresh] && execution_id
+            wait_for_execution_request(json_response['executionId'], options.merge({waiting_status:['new', 'pending', 'executing']}))
+          end
+        else
+          print_red_alert "Failed to create cloud affinity group #{json_response['msg']}"
+        end
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def update_affinity_group(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage( "[cloud] [affinity group] [options]")
+      opts.on('--active [on|off]', String, "Enable affinity group") do |val|
+        options[:active] = val.to_s == 'on' || val.to_s == 'true' || val.to_s == ''
+      end
+      add_perms_options(opts, options, ['groupDefaults'])
+      build_standard_update_options(opts, options)
+      opts.footer = "Update a cloud affinity group.\n" +
+          "[cloud] is required. This is the name or id of an existing cloud.\n" +
+          "[affinity group] is required. This is the name or id of an existing affinity group."
+    end
+
+    optparse.parse!(args)
+    if args.count != 2
+      raise_command_error "wrong number of arguments, expected 2 and got (#{args.count}) #{args}\n#{optparse}"
+    end
+    connect(options)
+
+    begin
+      cloud = find_cloud_by_name_or_id(args[0])
+      return 1 if cloud.nil?
+      affinity_group = find_cloud_affinity_group_by_name_or_id(cloud['id'], args[1])
+      if affinity_group.nil?
+        print_red_alert "Affinity Group not found by '#{args[1]}'"
+        exit 1
+      end
+      payload = nil
+      if options[:payload]
+        payload = options[:payload]
+        # support -O OPTION switch on top of everything
+        if options[:options]
+          payload.deep_merge!({'affinityGroup' => options[:options].reject {|k,v| k.is_a?(Symbol) }})
+        end
+      else
+        payload = {'affinityGroup' => {}}
+        payload['affinityGroup']['active'] = options[:active].nil? ? (Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox', 'description' => 'Active', 'defaultValue' => true}], options[:options], @api_client))['active'] == 'on' : options[:active]
+
+        perms = prompt_permissions(options.merge({:available_plans => namespace_service_plans}), affinity_group['owner']['id'] == current_user['accountId'] ? ['plans', 'groupDefaults'] : ['plans', 'groupDefaults', 'visibility', 'tenants'])
+        perms_payload = {}
+        perms_payload['resourcePermissions'] = perms['resourcePermissions'] if !perms['resourcePermissions'].nil?
+        perms_payload['tenantPermissions'] = perms['tenantPermissions'] if !perms['tenantPermissions'].nil?
+
+        payload['affinityGroup']['permissions'] = perms_payload
+        payload['affinityGroup']['visibility'] = perms['resourcePool']['visibility'] if !perms['resourcePool'].nil? && !perms['resourcePool']['visibility'].nil?
+
+        # support -O OPTION switch on top of everything
+        if options[:options]
+          payload.deep_merge!({'affinityGroup' => options[:options].reject {|k,v| k.is_a?(Symbol) }})
+        end
+
+        if payload['affinityGroup'].nil? || payload['affinityGroup'].empty?
+          raise_command_error "Specify at least one option to update.\n#{optparse}"
+        end
+      end
+
+      @clouds_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @clouds_interface.dry.update_affinity_group(cloud['id'], affinity_group['id'], payload)
+        return
+      end
+      json_response = @clouds_interface.update_affinity_group(cloud['id'], affinity_group['id'], payload)
+      if options[:json]
+        puts as_json(json_response)
+      elsif !options[:quiet]
+        affinity_group = json_response['affinityGroup']
+        print_green_success "Updated affinity group #{affinity_group['name']}"
+        #get_args = [cloud["id"], affinity_group["id"]] + (options[:remote] ? ["-r",options[:remote]] : [])
+        #get_namespace(get_args)
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def remove_affinity_group(args)
+    default_refresh_interval = 5
+    params = {}
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[cloud] [affinity group]")
+      # opts.on( '-f', '--force', "Force Delete" ) do
+      #   params[:force] = 'on'
+      # end
+      # opts.on('--refresh [SECONDS]', String, "Refresh until execution is complete. Default interval is #{default_refresh_interval} seconds.") do |val|
+      #   options[:refresh_interval] = val.to_s.empty? ? default_refresh_interval : val.to_f
+      # end
+      # opts.on(nil, '--no-refresh', "Do not refresh" ) do
+      #   options[:no_refresh] = true
+      # end
+      build_standard_remove_options(opts, options)
+      opts.footer = "Delete an affinity group from a cloud.\n" +
+        "[cloud] is required. This is the name or id of an existing cloud.\n" +
+        "[affinity group] is required. This is the name or id of an existing affinity group."
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:2)
+    connect(options)
+    params.merge!(parse_query_options(options))
+
+    cloud = find_cloud_by_name_or_id(args[0])
+    return 1 if cloud.nil?
+
+    affinity_group_id = args[1]
+    if affinity_group_id.empty?
+      raise_command_error "missing required worker parameter"
+    end
+
+    affinity_group = find_cloud_affinity_group_by_name_or_id(cloud['id'], affinity_group_id)
+    if affinity_group.nil?
+      print_red_alert "Affinity Group not found for '#{affinity_group_id}'"
+      return 1
+    end
+    unless options[:yes] || ::Morpheus::Cli::OptionTypes::confirm("Are you sure you would like to remove the cloud affinity group '#{affinity_group['name'] || affinity_group['id']}'?", options)
+      return 9, "aborted command"
+    end
+
+    @clouds_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @clouds_interface.dry.destroy_affinity_group(cloud['id'], affinity_group['id'], params)
+      return
+    end
+    json_response = @clouds_interface.destroy_affinity_group(cloud['id'], affinity_group['id'], params)
+    if options[:json]
+      puts as_json(json_response)
+    else
+      if json_response['success']
+        print_green_success "Removed affinity group #{affinity_group['name']}"
+        execution_id = json_response['executionId']
+        if !options[:no_refresh] && execution_id
+          wait_for_execution_request(execution_id, options.merge({waiting_status:['new', 'pending', 'executing']}))
+        end
+      else
+        print_red_alert "Failed to remove cloud affinity group #{json_response['msg']}"
+      end
+    end
+    return 0, nil
+  end
+
   private
 
   def cloud_list_column_definitions(options)
@@ -1259,4 +1585,26 @@ EOT
     end
   end
 
+  def find_cloud_affinity_group_by_name_or_id(cloud_id, val)
+    if val.to_s =~ /\A\d{1,}\Z/
+      @clouds_interface.get_affinity_group(cloud_id, val)['affinityGroup'] rescue nil
+    else
+      @clouds_interface.list_affinity_groups(cloud_id, {name: val})['affinityGroups'][0]
+    end
+  end
+
+  def add_cloud_affinity_group_option_types
+    [
+      {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text', 'required' => true},
+      {'fieldName' => 'affinityType', 'fieldLabel' => 'Type', 'type' => 'select', 'selectOptions' => [{'name' => 'Keep Separate', 'value' => 'KEEP_SEPARATE'}, {'name' => 'Keep Together', 'value' => 'KEEP_TOGETHER'}], 'description' => 'Choose affinity type.', 'required' => true, 'defaultValue' => 'KEEP_SEPARATE'},
+      {'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox', 'defaultValue' => true},
+      {'fieldName' => 'pool.id', 'fieldLabel' => 'Cluster', 'type' => 'select', 'optionSourceType' => 'vmware', 'optionSource' => 'vmwareZonePoolClusters', 'description' => 'Select cluster for the affinity group.', 'required' => true},
+      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiSelect', 'optionSource' => 'searchServers', 'description' => 'Select servers to be in the affinity group.'},
+    ]
+  end
+
+  def format_affinity_type(affinity_type)
+    affinity_type == "KEEP_SEPARATE" ? "Keep Separate" : "Keep Together"
+  end
+    
 end
