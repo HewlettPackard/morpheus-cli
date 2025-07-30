@@ -149,6 +149,35 @@ class Morpheus::VirtualImagesInterface < Morpheus::APIClient
     execute(method: :delete, url: url, headers: headers)
   end
 
+  def download_chunked(id, outfile, params={})
+    raise "#{self.class}.download_chunked() passed a blank id!" if id.to_s == ''
+    url = "#{@base_url}/api/virtual-images/#{id}/download"
+    headers = { params: params, authorization: "Bearer #{@access_token}" }
+    opts = {method: :get, url: url, headers: headers}
+    # execute(opts, {parse_json: false})
+    if Dir.exist?(outfile)
+      raise "outfile is invalid. It is the name of an existing directory: #{outfile}"
+    end
+    # if @verify_ssl == false
+    #   opts[:verify_ssl] = OpenSSL::SSL::VERIFY_NONE
+    # end
+    if @dry_run
+      return opts
+    end
+    http_response = nil
+    File.open(outfile, 'w') {|f|
+      block = proc { |response|
+        response.read_body do |chunk|
+          # writing to #{outfile} ..."
+          f.write chunk
+        end
+      }
+      opts[:block_response] = block
+      http_response = Morpheus::RestClient.execute(opts)
+    }
+    return http_response
+  end
+
   def location_base_path(resource_id)
     "/api/virtual-images/#{resource_id}/locations"
   end
