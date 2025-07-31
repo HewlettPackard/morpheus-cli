@@ -1523,9 +1523,13 @@ EOT
         else
           print_green_success json_response['msg']
         end
-        execution_id = json_response['executionId']
-        if !options[:no_refresh] && execution_id
-          wait_for_execution_request(json_response['executionId'], options.merge({waiting_status:['new', 'pending', 'executing']}))
+        process_id = json_response['processId'] || (json_response['processIds'] ? json_response['processIds'][0] : nil)
+        if process_id
+          unless options[:no_refresh]
+            process = wait_for_process_execution(process_id, options)
+          end
+        else
+          # puts "No process returned"
         end
       else
         # never reached because unsuccessful requests raise an exception
