@@ -7,7 +7,7 @@ class Morpheus::Cli::VirtualImages
   include Morpheus::Cli::ProvisioningHelper
 
   register_subcommands :list, :get, :add, :add_file, :remove_file, :update, :remove, 
-                       :convert, {:types => :available_virtual_image_types}, :download
+                       :convert, {:types => :virtual_image_types}, :download
   register_subcommands :list_locations, :get_location, :remove_location
 
   # def initialize() 
