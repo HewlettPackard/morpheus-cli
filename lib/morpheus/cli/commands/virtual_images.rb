@@ -6,7 +6,8 @@ class Morpheus::Cli::VirtualImages
   include Morpheus::Cli::CliCommand
   include Morpheus::Cli::ProvisioningHelper
 
-  register_subcommands :list, :get, :add, :add_file, :remove_file, :update, :remove, :convert, :types => :virtual_image_types
+  register_subcommands :list, :get, :add, :add_file, :remove_file, :update, :remove, 
+                       :convert, {:types => :virtual_image_types}, :download
   register_subcommands :list_locations, :get_location, :remove_location
 
   # def initialize() 
@@ -971,6 +972,94 @@ EOT
       print_green_success "Removed virtual image location #{location['id']}"
     end
     return 0, nil
+  end
+
+  def download(args)
+    full_command_string = "#{command_name} download #{args.join(' ')}".strip
+    options = {}
+    outfile = nil
+    do_overwrite = false
+    do_mkdir = false
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[image] [local-file]")
+      opts.on( '-f', '--force', "Overwrite existing [local-file] if it exists." ) do
+        do_overwrite = true
+        # do_mkdir = true
+      end
+      opts.on( '-p', '--mkdir', "Create missing directories for [local-file] if they do not exist." ) do
+        do_mkdir = true
+      end
+      build_common_options(opts, options, [:dry_run, :quiet])
+      opts.footer = "Download a virtual image as a .zip file.\n" + 
+                    "[image] is required. This is the name or id of a virtual image.\n" +
+                    "[local-file] is required. This is the full local filepath for the downloaded zip file."
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:2)
+    connect(options)
+    
+    virtual_image = find_virtual_image_by_name_or_id(args[0])
+    return 1 if virtual_image.nil?
+    outfile = args[1]
+    # if outfile.end_with?(".zip")
+    #   print_red_alert "[local-file] is invalid. It must use extension .zip: #{outfile}"
+    #   return 1
+    # end
+    outfile = File.expand_path(outfile)
+    if Dir.exist?(outfile)
+      raise_command_error "[local-file] is invalid. It is the name of an existing directory: #{outfile}", args, optparse
+    end
+    destination_dir = File.dirname(outfile)
+    if !Dir.exist?(destination_dir)
+      if do_mkdir
+        print cyan,"Creating local directory #{destination_dir}",reset,"\n"
+        FileUtils.mkdir_p(destination_dir)
+      else
+        raise_command_error "[local-file] is invalid. Directory not found: #{destination_dir}", args, optparse
+      end
+    end
+    if File.exist?(outfile)
+      if do_overwrite
+        # uhh need to be careful wih the passed filepath here..
+        # don't delete, just overwrite.
+        # File.delete(outfile)
+      else
+        raise_command_error "[local-file] is invalid. File already exists: #{outfile}", "Use -f to overwrite the existing file.", args, optparse
+      end
+    end
+    
+    @virtual_images_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @virtual_images_interface.dry.download_chunked(virtual_image['id'], outfile), full_command_string
+      return 0, nil
+    end
+    if !options[:quiet]
+      print cyan + "Downloading archive file #{virtual_image['name']} to #{outfile} ... "
+    end
+
+    http_response = @virtual_images_interface.download_chunked(virtual_image['id'], outfile)
+
+    # FileUtils.chmod(0600, outfile)
+    success = http_response.code.to_i == 200
+    if success
+      if !options[:quiet]
+        print green + "SUCCESS" + reset + "\n"
+      end
+      return 0, nil
+    else
+      if !options[:quiet]
+        print red + "ERROR" + reset + " HTTP #{http_response.code}" + "\n"
+      end
+      # F it, just remove a bad result
+      if File.exist?(outfile) && File.file?(outfile)
+        Morpheus::Logging::DarkPrinter.puts "Deleting bad file download: #{outfile}" if Morpheus::Logging.debug?
+        File.delete(outfile)
+      end
+      if options[:debug]
+        puts_error http_response.inspect
+      end
+      return 1, "Error downloading file"
+    end
   end
 
   private
