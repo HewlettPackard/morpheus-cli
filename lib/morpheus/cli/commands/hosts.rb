@@ -971,6 +971,7 @@ class Morpheus::Cli::Hosts
         end
         #api_params.deep_merge(payload)
         params = Morpheus::Cli::OptionTypes.prompt(option_type_list,options[:options],@api_client, api_params)
+        params.booleanize!
         payload.deep_merge!(params)
         
       end
@@ -1054,6 +1055,7 @@ class Morpheus::Cli::Hosts
       new_group = nil
       passed_options = options[:options] ? options[:options].reject {|k,v| k.is_a?(Symbol) } : {}
       params.deep_merge!(passed_options) unless passed_options.empty?
+      params.booleanize!
       # metadata tags
       if options[:tags]
         params['tags'] = parse_metadata(options[:tags])
