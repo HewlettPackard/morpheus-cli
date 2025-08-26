@@ -849,23 +849,27 @@ class Morpheus::Cli::Hosts
         end
 
         payload = {}
-        # prompt for service plan
-        service_plans_json = @servers_interface.service_plans({zoneId: cloud['id'], serverTypeId: server_type["id"]})
-        service_plans = service_plans_json["plans"]
-        service_plans_dropdown = service_plans.collect {|sp| {'name' => sp["name"], 'value' => sp["id"]} } # already sorted
-        plan_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'plan', 'type' => 'select', 'fieldLabel' => 'Plan', 'selectOptions' => service_plans_dropdown, 'required' => true, 'description' => 'Choose the appropriately sized plan for this server'}],options[:options])
-        service_plan = service_plans.find {|sp| sp["id"] == plan_prompt['plan'].to_i }
-
-        # uh ok, this actually expects config at root level, sibling of server 
-        # payload.deep_merge!({'server' => passed_options}) unless passed_options.empty?
         payload.deep_merge!(passed_options) unless passed_options.empty?
         payload.deep_merge!({'server' => {
           'name' => host_name,
           'zone' => {'id' => cloud['id']},
           'computeServerType' => {'id' => server_type['id']},
-          'plan' => {'id' => service_plan["id"]}
-          }
-        })
+        }})
+
+        # Service plans do not apply during bare-metal server imports
+        has_service_plans=!server_type['bareMetalHost']
+
+        # uh ok, this actually expects config at root level, sibling of server
+        # payload.deep_merge!({'server' => passed_options}) unless passed_options.empty?
+        # prompt for service plan
+        if has_service_plans
+          service_plans_json = @servers_interface.service_plans({ zoneId: cloud['id'], serverTypeId: server_type["id"] })
+          service_plans = service_plans_json["plans"]
+          service_plans_dropdown = service_plans.collect { |sp| { 'name' => sp["name"], 'value' => sp["id"] } } # already sorted
+          plan_prompt = Morpheus::Cli::OptionTypes.prompt([{ 'fieldName' => 'plan', 'type' => 'select', 'fieldLabel' => 'Plan', 'selectOptions' => service_plans_dropdown, 'required' => true, 'description' => 'Choose the appropriately sized plan for this server' }], options[:options])
+          service_plan = service_plans.find { |sp| sp["id"] == plan_prompt['plan'].to_i }
+          payload['server']['plan'] = {'id' => service_plan['id']}
+        end
 
         option_type_list = server_type['optionTypes']
 
@@ -903,16 +907,18 @@ class Morpheus::Cli::Hosts
           end
         end
 
-        # prompt for volumes
-        volumes = prompt_volumes(service_plan, provision_type, options, @api_client, {zoneId: cloud_id, serverTypeId: server_type['id'], siteId: group_id})
-        if !volumes.empty?
-          payload['volumes'] = volumes
-        end
+        if has_service_plans
+          # prompt for volumes
+          volumes = prompt_volumes(service_plan, provision_type, options, @api_client, {zoneId: cloud_id, serverTypeId: server_type['id'], siteId: group_id})
+          if !volumes.empty?
+            payload['volumes'] = volumes
+          end
 
-        # plan customizations
-        plan_opts = prompt_service_plan_options(service_plan, options, @api_client, {})
-        if plan_opts && !plan_opts.empty?
-          payload['servicePlanOptions'] = plan_opts
+          # plan customizations
+          plan_opts = prompt_service_plan_options(service_plan, options, @api_client, {})
+          if plan_opts && !plan_opts.empty?
+            payload['servicePlanOptions'] = plan_opts
+          end
         end
 
         # prompt for network interfaces (if supported)
