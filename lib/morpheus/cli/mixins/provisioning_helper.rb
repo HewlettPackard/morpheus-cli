@@ -1067,7 +1067,7 @@ module Morpheus::Cli::ProvisioningHelper
 
     no_prompt = (options[:no_prompt] || (options[:options] && options[:options][:no_prompt]))
     volumes = []
-    plan_size = nil
+    plan_size = 0
     if plan_info['maxStorage'].to_i > 0
       plan_size = plan_info['maxStorage'].to_i / (1024 * 1024 * 1024)
     end
