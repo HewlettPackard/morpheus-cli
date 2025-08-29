@@ -1927,7 +1927,8 @@ module Morpheus::Cli::ProvisioningHelper
         ip_required = false
       end
 
-      if ip_available
+      # Prompt for IP input when static assignment is allowed or an IP is explicitly required
+      if ip_available || ip_required
         v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'ipAddress', 'type' => 'text', 'fieldLabel' => "IP Address", 'required' => ip_required, 'description' => 'Enter an IP for this network interface. x.x.x.x', 'defaultValue' => network_interface['ipAddress']}], options[:options])
         if v_prompt[field_context] && !v_prompt[field_context]['ipAddress'].to_s.empty?
           network_interface['ipAddress'] = v_prompt[field_context]['ipAddress']
