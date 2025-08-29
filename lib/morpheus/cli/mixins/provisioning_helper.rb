@@ -2145,8 +2145,8 @@ module Morpheus::Cli::ProvisioningHelper
     return payload
   end
 
-  def prompt_cluster_load_balancer(cluster, options)
-    v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'loadBalancerTypeId', 'type' => 'select', 'fieldLabel' => "Load Balancer", 'optionSource' => 'loadBalancerTypes', 'required' => false, 'description' => 'Select Load Balancer for Cluster', 'defaultValue' => '', 'excludeKubevip' => true}], options[:options], api_client, cluster)
+  def prompt_cluster_load_balancer(cluster, options, can_use_kubevip)
+    v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'loadBalancerTypeId', 'type' => 'select', 'fieldLabel' => "Load Balancer", 'optionSource' => 'loadBalancerTypes', 'required' => false, 'description' => 'Select Load Balancer for Cluster', 'defaultValue' => '', 'excludeKubevip' => !can_use_kubevip}], options[:options], api_client, cluster)
     lb_type_id = v_prompt['loadBalancerTypeId']
 
     if lb_type_id.empty?

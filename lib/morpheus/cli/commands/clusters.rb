@@ -624,11 +624,13 @@ class Morpheus::Cli::Clusters
           end
 
           if controller_provision_type && resource_pool = prompt_resource_pool(group, cloud, service_plan, controller_provision_type, options)
-            server_payload['config']['resourcePoolId'] = resource_pool['id']
-            api_params['config'] ||= {}
-            api_params['config']['resourcePool'] = resource_pool['id']
-            api_params['resourcePoolId'] = resource_pool['id']
-            api_params['zonePoolId'] = resource_pool['id']
+            if resource_pool
+              server_payload['config']['resourcePoolId'] = resource_pool['id']
+              api_params['config'] ||= {}
+              api_params['config']['resourcePool'] = resource_pool['id']
+              api_params['resourcePoolId'] = resource_pool['id']
+              api_params['zonePoolId'] = resource_pool['id']
+            end
           end
         end
 
@@ -761,7 +763,8 @@ class Morpheus::Cli::Clusters
 
         if loadbalancer_option_type
           lb_payload = { computeTypeLayoutId: cluster_payload['layout']['id']}
-          load_balancer_id = prompt_cluster_load_balancer(cluster_payload, options)
+          # look to see if "can provision Kubevip" if so pass true as third param
+          load_balancer_id = prompt_cluster_load_balancer(cluster_payload, options, can_use_kubevip(provision_type["code"], cluster_payload["type"]))
           if load_balancer_id != false
             lb_payload['loadBalancerId'] = load_balancer_id
             lb_payload['loadBalancerInstanceId'] = -1
@@ -4692,6 +4695,12 @@ class Morpheus::Cli::Clusters
     @clouds_interface.cloud_type(zone_type_id)['zoneType']['provisionTypes'].first rescue nil
   end
 
+  def can_use_kubevip(type, group_type)
+    payload = {'provisionType' => type, 'groupType' => group_type }
+    can_use = @clusters_interface.can_use_kubevip(payload)
+    return can_use
+  end
+
   def load_group(group_type, options)
     # Group / Site
     group_id = nil
@@ -4903,15 +4912,17 @@ class Morpheus::Cli::Clusters
         resource_pool_options = @options_interface.options_for_source('zonePools', {groupId: group['id'], zoneId: cloud['id']}.merge(service_plan ? {planId: service_plan['id']} : {}))['data'].reject { |it| it['id'].nil? && it['name'].nil? }
 
         if resource_pool_options.empty?
-          print_red_alert "Cloud #{cloud['name']} has no available resource pools"
-          exit 1
+          print yellow,bold, "Cloud #{cloud['name']} has no available resource pools",reset,"\n\n"
+          return
+          #exit 1
         elsif resource_pool_options.count > 1 && !options[:no_prompt]
           resource_pool_id = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'resourcePool', 'type' => 'select', 'fieldLabel' => 'Resource Pool', 'selectOptions' => resource_pool_options, 'required' => true, 'skipSingleOption' => true, 'description' => 'Select resource pool.'}],options[:options],api_client, {})['resourcePool']
         else
           first_option = resource_pool_options.find {|it| !it['id'].nil? }
           if first_option.nil?
-            print_red_alert "Cloud #{cloud['name']} has no available resource pools"
-            exit 1
+            print yellow,bold, "Cloud #{cloud['name']} has no available resource pools",reset,"\n\n"
+            return
+            #exit 1
           end
           resource_pool_id = first_option['id']
         end

@@ -339,6 +339,13 @@ class Morpheus::ClustersInterface < Morpheus::APIClient
     execute(opts)
   end
 
+  def can_use_kubevip(payload)
+    url = "#{@base_url}/api/clusters/can-use-kubevip"
+    payload["requestSourceType"] = "api"
+    headers = { authorization: "Bearer #{@access_token}", 'Content-Type' => 'application/json' }
+    execute(method: :get, url: url, headers: headers, payload: payload.to_json)
+  end
+
   def list_resources(id, resources, params={})
     url = "#{base_path}/#{id}/#{resources}"
     headers = { params: params, authorization: "Bearer #{@access_token}" }
