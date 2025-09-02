@@ -1909,23 +1909,13 @@ module Morpheus::Cli::ProvisioningHelper
         default_interface_type_value = (network_interface_type_options.find {|t| t['value'].to_s == network_interface['networkInterfaceTypeId'].to_s} || {})['name']
         v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'networkInterfaceTypeId', 'type' => 'select', 'fieldLabel' => "Network Interface Type", 'selectOptions' => network_interface_type_options, 'required' => true, 'skipSingleOption' => true, 'description' => 'Choose a network interface type.', 'defaultValue' => default_interface_type_value}], options[:options])
         network_interface['networkInterfaceTypeId'] = v_prompt[field_context]['networkInterfaceTypeId'].to_i
+        selected_network_interface_type = network_interface_types.find {|it| it["id"] == network_interface['networkInterfaceTypeId']}
       end
 
-      # choose IP if network allows it
-      # allowStaticOverride is only returned in 4.2.1+, so treat null as true for now..
-      ip_available = selected_network['allowStaticOverride'] == true || selected_network['allowStaticOverride'].nil?
-      ip_required = true
-      if selected_network['id'].to_s.include?('networkGroup')
-        #puts "IP Address: Using network group." if !no_prompt
-        ip_available = false
-        ip_required = false
-      elsif selected_network['pool']
-        #puts "IP Address: Using pool '#{selected_network['pool']['name']}'" if !no_prompt
-        ip_required = false
-      elsif selected_network['dhcpServer']
-        #puts "IP Address: Using DHCP" if !no_prompt
-        ip_required = false
-      end
+      # determine if IP can/should be specified for selected network
+      ip_flags = determine_ip_requirements(selected_network)
+      ip_available = ip_flags[:ip_available]
+      ip_required = ip_flags[:ip_required]
 
       # Prompt for IP input when static assignment is allowed or an IP is explicitly required
       if ip_available || ip_required
@@ -1939,6 +1929,68 @@ module Morpheus::Cli::ProvisioningHelper
         network_interface['ipMode'] = 'dhcp'
       elsif network_interface['ipAddress']
         network_interface['ipMode'] = 'static'
+      end
+
+      # prompt for virtual interfaces if supported by the selected network interface type
+      if selected_network_interface_type['hasVirtualInterfaces']
+        virtual_interfaces = []
+        vi_index = 0
+
+        # gather virtual interface types for the selected network interface type
+        vi_interface_types= selected_network_interface_type['virtualInterfaces'] || []
+        vi_type_options = []
+        vi_interface_types.each do |opt|
+          if !opt.nil?
+            vi_type_options << {'name' => opt['name'], 'value' => opt['id']}
+          end
+        end
+
+        add_another_vi = !vi_type_options.empty? && Morpheus::Cli::OptionTypes.confirm("Add virtual network interface?", {default: false})
+        while add_another_vi
+          vi_field_context = "#{field_context}_virtualInterface#{vi_index+1}"
+
+          vi_prompt = Morpheus::Cli::OptionTypes.prompt([
+            {'fieldContext' => vi_field_context, 'fieldName' => 'networkId', 'type' => 'select', 'fieldLabel' => "Virtual Network", 'selectOptions' => network_options, 'required' => true, 'description' => 'Choose a virtual interface network name.'},
+            {'fieldContext' => vi_field_context, 'fieldName' => 'interfaceTypeId', 'type' => 'select', 'fieldLabel' => "Virtual Network Interface Type", 'selectOptions' => vi_type_options, 'required' => true, 'description' => 'Choose a virtual interface type.'}
+          ], options[:options])
+
+          virtual_interfaces << {
+            'network' => {'id' => vi_prompt[vi_field_context]['networkId'].to_s},
+            'networkInterfaceTypeId' => vi_prompt[vi_field_context]['interfaceTypeId'].to_s
+          }
+
+          selected_vif_network_id = vi_prompt[vi_field_context]['networkId'].to_s
+          selected_vif_network = networks.find {|it| it["id"].to_s == selected_vif_network_id }
+
+          vif_ip_flags = determine_ip_requirements(selected_vif_network)
+          vif_ip_available = vif_ip_flags[:ip_available]
+          vif_ip_required = vif_ip_flags[:ip_required]
+
+          # Prompt for IP input when static assignment is allowed or an IP is explicitly required
+          current_vi = virtual_interfaces.last
+          if vif_ip_available || vif_ip_required
+            vi_prompt = Morpheus::Cli::OptionTypes.prompt(
+              [{'fieldContext' => vi_field_context, 'fieldName' => 'ipAddress', 'type' => 'text',
+                'fieldLabel' => "IP Address", 'required' => vif_ip_required,
+                'description' => 'Enter an IP for this virtual interface. x.x.x.x',
+                'defaultValue' => current_vi['ipAddress']}],
+              options[:options]
+            )
+            if vi_prompt[vi_field_context] && !vi_prompt[vi_field_context]['ipAddress'].to_s.empty?
+              current_vi['ipAddress'] = vi_prompt[vi_field_context]['ipAddress']
+            end
+          end
+
+          if vif_ip_required == false && current_vi['ipAddress'].nil? && selected_vif_network['dhcpServer'] == true
+            current_vi['ipMode'] = 'dhcp'
+          elsif current_vi['ipAddress']
+            current_vi['ipMode'] = 'static'
+          end
+
+          vi_index += 1
+          add_another_vi = Morpheus::Cli::OptionTypes.confirm("Add another virtual network interface?", {default: false})
+        end
+        network_interface['networkInterfaces'] = virtual_interfaces unless virtual_interfaces.empty?
       end
 
       network_interfaces << network_interface
@@ -1957,6 +2009,23 @@ module Morpheus::Cli::ProvisioningHelper
     return network_interfaces
 
   end
+
+  # determine if IP can/should be specified for selected network
+  def determine_ip_requirements(selected_network)
+    ip_available = selected_network['allowStaticOverride'] != false
+    ip_required = true
+    if selected_network['id'].to_s.include?('networkGroup')
+      ip_available = false
+      ip_required = false
+    elsif selected_network['pool']
+      ip_required = false
+    elsif selected_network['dhcpServer']
+      ip_required = false
+    end
+    {ip_available: ip_available, ip_required: ip_required}
+  end
+
+  # This recreates the behavior of multi_networks.js
 
   # Prompts user for environment variables for new instance
   # returns array of evar objects {id: null, name: "VAR", value: "somevalue"}
