@@ -1932,67 +1932,19 @@ module Morpheus::Cli::ProvisioningHelper
       end
 
       # prompt for virtual interfaces if supported by the selected network interface type
-      if selected_network_interface_type['hasVirtualInterfaces']
-        virtual_interfaces = []
-        vi_index = 0
+      virtual_interfaces = build_virtual_interfaces(
+        selected_network_interface_type,
+        networks,
+        network_options,
+        field_context,
+        interface_index,
+        options,
+        no_prompt
+      )
+      virtual_interfaces ||= []
+      network_interface['networkInterfaces'] = virtual_interfaces unless virtual_interfaces.empty?
 
-        # gather virtual interface types for the selected network interface type
-        vi_interface_types= selected_network_interface_type['virtualInterfaces'] || []
-        vi_type_options = []
-        vi_interface_types.each do |opt|
-          if !opt.nil?
-            vi_type_options << {'name' => opt['name'], 'value' => opt['id']}
-          end
-        end
-
-        add_another_vi = !vi_type_options.empty? && Morpheus::Cli::OptionTypes.confirm("Add virtual network interface?", {default: false})
-        while add_another_vi
-          vi_field_context = "#{field_context}_virtualInterface#{vi_index+1}"
-
-          vi_prompt = Morpheus::Cli::OptionTypes.prompt([
-            {'fieldContext' => vi_field_context, 'fieldName' => 'networkId', 'type' => 'select', 'fieldLabel' => "Virtual Network", 'selectOptions' => network_options, 'required' => true, 'description' => 'Choose a virtual interface network name.'},
-            {'fieldContext' => vi_field_context, 'fieldName' => 'interfaceTypeId', 'type' => 'select', 'fieldLabel' => "Virtual Network Interface Type", 'selectOptions' => vi_type_options, 'required' => true, 'description' => 'Choose a virtual interface type.'}
-          ], options[:options])
-
-          virtual_interfaces << {
-            'network' => {'id' => vi_prompt[vi_field_context]['networkId'].to_s},
-            'networkInterfaceTypeId' => vi_prompt[vi_field_context]['interfaceTypeId'].to_s
-          }
-
-          selected_vif_network_id = vi_prompt[vi_field_context]['networkId'].to_s
-          selected_vif_network = networks.find {|it| it["id"].to_s == selected_vif_network_id }
-
-          vif_ip_flags = determine_ip_requirements(selected_vif_network)
-          vif_ip_available = vif_ip_flags[:ip_available]
-          vif_ip_required = vif_ip_flags[:ip_required]
-
-          # Prompt for IP input when static assignment is allowed or an IP is explicitly required
-          current_vi = virtual_interfaces.last
-          if vif_ip_available || vif_ip_required
-            vi_prompt = Morpheus::Cli::OptionTypes.prompt(
-              [{'fieldContext' => vi_field_context, 'fieldName' => 'ipAddress', 'type' => 'text',
-                'fieldLabel' => "IP Address", 'required' => vif_ip_required,
-                'description' => 'Enter an IP for this virtual interface. x.x.x.x',
-                'defaultValue' => current_vi['ipAddress']}],
-              options[:options]
-            )
-            if vi_prompt[vi_field_context] && !vi_prompt[vi_field_context]['ipAddress'].to_s.empty?
-              current_vi['ipAddress'] = vi_prompt[vi_field_context]['ipAddress']
-            end
-          end
-
-          if vif_ip_required == false && current_vi['ipAddress'].nil? && selected_vif_network['dhcpServer'] == true
-            current_vi['ipMode'] = 'dhcp'
-          elsif current_vi['ipAddress']
-            current_vi['ipMode'] = 'static'
-          end
-
-          vi_index += 1
-          add_another_vi = Morpheus::Cli::OptionTypes.confirm("Add another virtual network interface?", {default: false})
-        end
-        network_interface['networkInterfaces'] = virtual_interfaces unless virtual_interfaces.empty?
-      end
-
+      # append the interface
       network_interfaces << network_interface
       interface_index += 1
       if options[:options] && options[:options]['networkInterfaces'] && options[:options]['networkInterfaces'][interface_index]
@@ -2023,6 +1975,120 @@ module Morpheus::Cli::ProvisioningHelper
       ip_required = false
     end
     {ip_available: ip_available, ip_required: ip_required}
+  end
+
+  # utility to build virtual interfaces
+  def build_virtual_interfaces(selected_network_interface_type, networks, network_options, field_context, interface_index, options, no_prompt)
+    return [] unless selected_network_interface_type && selected_network_interface_type['hasVirtualInterfaces']
+
+    virtual_interfaces = []
+    vi_index = 0
+
+    # gather virtual interface types for the selected network interface type
+    vi_interface_types = selected_network_interface_type['virtualInterfaces'] || []
+    vi_type_options = []
+    vi_interface_types.each do |opt|
+      next if opt.nil?
+      vi_type_options << {'name' => opt['name'], 'value' => opt['id']}
+    end
+
+    preconfigured_vi_inputs = []
+    if options[:options]
+      if options[:options]['networkInterfaces'] &&
+         options[:options]['networkInterfaces'][interface_index] &&
+         options[:options]['networkInterfaces'][interface_index]['virtualInterfaces'].is_a?(Array)
+        options[:options]['networkInterfaces'][interface_index]['virtualInterfaces'].each do |raw_vi|
+          preconfigured_vi_inputs << raw_vi if raw_vi.is_a?(Hash)
+        end
+      end
+    end
+
+    # validate preconfigured virtual interfaces
+    preconfigured_vi_inputs.each do |raw_vi|
+      net_id = raw_vi['networkId'] ||
+               (raw_vi['network'] && raw_vi['network']['id']) ||
+               raw_vi['id']
+
+      next if net_id.to_s.empty?
+
+      vi_type_id = raw_vi['interfaceTypeId'] || raw_vi['networkInterfaceTypeId']
+      vi_type_id = vi_type_id.to_i if vi_type_id
+      if vi_type_id && !vi_type_options.find {|t| t['value'].to_i == vi_type_id }
+        raise_command_error("Invalid virtual interfaceTypeId=#{vi_type_id} for virtual interface networkId=#{net_id}.")
+      end
+
+      selected_vif_network = networks.find {|it| it["id"].to_s == net_id.to_s }
+      next unless selected_vif_network
+      vif_ip_flags = determine_ip_requirements(selected_vif_network)
+
+      # deep cloning the raw input
+      vi_record = raw_vi.is_a?(Hash) ? Marshal.load(Marshal.dump(raw_vi)) : {}
+      vi_record['network'] = {}
+      vi_record['network']['id'] = net_id.to_s
+      vi_record['networkInterfaceTypeId'] = vi_type_id
+
+      if raw_vi['ipAddress']
+        vi_record['ipMode'] = 'static'
+      elsif vif_ip_flags[:ip_available] == false && vif_ip_flags[:ip_required] == false && selected_vif_network['dhcpServer'] == true
+        vi_record['ipMode'] = 'dhcp'
+      end
+
+      virtual_interfaces << vi_record
+      vi_index += 1
+    end
+
+    # Interactive addition (if allowed) after preconfigured ones
+    confirm_message = virtual_interfaces.empty? ? "Add virtual network interface for 'interface-#{interface_index}'?" :
+                        "Add another virtual network interface for 'interface-#{interface_index}'?"
+    add_another_vi = !vi_type_options.empty? && !no_prompt && Morpheus::Cli::OptionTypes.confirm(confirm_message, {default: false})
+    while add_another_vi
+      vi_field_context = "#{field_context}_virtualInterface#{vi_index+1}"
+      vi_prompt = Morpheus::Cli::OptionTypes.prompt(
+        [
+          {'fieldContext' => vi_field_context, 'fieldName' => 'networkId', 'type' => 'select', 'fieldLabel' => "Virtual Network", 'selectOptions' => network_options, 'required' => true, 'description' => 'Choose a virtual interface network name.'},
+          {'fieldContext' => vi_field_context, 'fieldName' => 'interfaceTypeId', 'type' => 'select', 'fieldLabel' => "Virtual Network Interface Type", 'selectOptions' => vi_type_options, 'required' => true, 'description' => 'Choose a virtual interface type.'}
+        ],
+        options[:options]
+      )
+
+      vi_record = {
+        'network' => {'id' => vi_prompt[vi_field_context]['networkId'].to_s},
+        'networkInterfaceTypeId' => vi_prompt[vi_field_context]['interfaceTypeId'].to_s
+      }
+      selected_vif_network_id = vi_prompt[vi_field_context]['networkId'].to_s
+      selected_vif_network = networks.find {|it| it["id"].to_s == selected_vif_network_id }
+
+      vif_ip_flags = determine_ip_requirements(selected_vif_network)
+      vif_ip_available = vif_ip_flags[:ip_available]
+      vif_ip_required = vif_ip_flags[:ip_required]
+
+      if vif_ip_available || vif_ip_required
+        ip_prompt = Morpheus::Cli::OptionTypes.prompt(
+          [
+            {'fieldContext' => vi_field_context, 'fieldName' => 'ipAddress', 'type' => 'text',
+             'fieldLabel' => "IP Address", 'required' => vif_ip_required,
+             'description' => 'Enter an IP for this virtual interface. x.x.x.x',
+             'defaultValue' => vi_record['ipAddress']}
+          ],
+          options[:options]
+        )
+        if ip_prompt[vi_field_context] && !ip_prompt[vi_field_context]['ipAddress'].to_s.empty?
+          vi_record['ipAddress'] = ip_prompt[vi_field_context]['ipAddress']
+        end
+      end
+
+      if vif_ip_required == false && vi_record['ipAddress'].nil? && selected_vif_network['dhcpServer'] == true
+        vi_record['ipMode'] = 'dhcp'
+      elsif vi_record['ipAddress']
+        vi_record['ipMode'] = 'static'
+      end
+
+      virtual_interfaces << vi_record
+      vi_index += 1
+      add_another_vi = !no_prompt && Morpheus::Cli::OptionTypes.confirm("Add another virtual network interface for 'interface-#{interface_index}'?", {default: false})
+    end
+
+    virtual_interfaces
   end
 
   # This recreates the behavior of multi_networks.js
