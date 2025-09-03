@@ -1932,7 +1932,7 @@ module Morpheus::Cli::ProvisioningHelper
       end
 
       # prompt for virtual interfaces if supported by the selected network interface type
-      virtual_interfaces = build_virtual_interfaces(
+      virtual_interfaces = prompt_virtual_interfaces(
         selected_network_interface_type,
         networks,
         network_options,
@@ -1978,7 +1978,7 @@ module Morpheus::Cli::ProvisioningHelper
   end
 
   # utility to build virtual interfaces
-  def build_virtual_interfaces(selected_network_interface_type, networks, network_options, field_context, interface_index, options, no_prompt)
+  def prompt_virtual_interfaces(selected_network_interface_type, networks, network_options, field_context, interface_index, options, no_prompt)
     return [] unless selected_network_interface_type && selected_network_interface_type['hasVirtualInterfaces']
 
     virtual_interfaces = []
@@ -2003,7 +2003,7 @@ module Morpheus::Cli::ProvisioningHelper
       end
     end
 
-    # validate preconfigured virtual interfaces
+    # validating preconfigured virtual interfaces
     preconfigured_vi_inputs.each do |raw_vi|
       net_id = raw_vi['networkId'] ||
                (raw_vi['network'] && raw_vi['network']['id']) ||
@@ -2023,8 +2023,7 @@ module Morpheus::Cli::ProvisioningHelper
 
       # deep cloning the raw input
       vi_record = raw_vi.is_a?(Hash) ? Marshal.load(Marshal.dump(raw_vi)) : {}
-      vi_record['network'] = {}
-      vi_record['network']['id'] = net_id.to_s
+      vi_record['network'] = {'id' => net_id.to_s}
       vi_record['networkInterfaceTypeId'] = vi_type_id
 
       if raw_vi['ipAddress']
