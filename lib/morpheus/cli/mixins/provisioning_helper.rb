@@ -2109,8 +2109,6 @@ module Morpheus::Cli::ProvisioningHelper
     virtual_interfaces
   end
 
-  # This recreates the behavior of multi_networks.js
-
   # Prompts user for environment variables for new instance
   # returns array of evar objects {id: null, name: "VAR", value: "somevalue"}
   def prompt_evars(options={})
