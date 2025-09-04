@@ -748,6 +748,13 @@ class Morpheus::Cli::Clusters
           default_repo = options[:default_repo] || Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'defaultRepoAccount', 'fieldLabel' => 'Cluster Repo Account', 'type' => 'select', 'required' => false, 'optionSource' => 'dockerHubRegistries'}], options[:options], @api_client, api_params)['defaultRepoAccount']
           if default_repo != ""
             server_payload['config']['defaultRepoAccount'] = default_repo
+
+            # Act As Image Server
+            image_server = !options[:image_server].nil? ? options[:image_server] : Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'imageServer', 'fieldLabel' => 'Act As Image Server', 'type' => 'checkbox', 'required' => false, 'defaultValue' => 'on'}], options[:options], @api_client, api_params)['imageServer']
+            if image_server != ""
+              # api used to expect "on" so don't booleanize this one
+              server_payload['config']['imageServer'] = image_server ? 'on' : 'off'
+            end
           end
         end
 
@@ -4878,8 +4885,8 @@ class Morpheus::Cli::Clusters
     opts.on('--security-groups LIST', Array, "Security Groups") do |list|
       options[:securityGroups] = list
     end
-    opts.on("--create-user on|off", String, "User Config: Create Your User. Default is off") do |val|
-      options[:createUser] = ['true','on','1'].include?(val.to_s)
+    opts.on("--create-user [on|off]", String, "User Config: Create Your User. Default is off") do |val|
+      options[:createUser] = ['true','on','1',''].include?(val.to_s)
     end
     opts.on("--user-group USERGROUP", String, "User Config: User Group") do |val|
       options[:userGroup] = val
@@ -4889,6 +4896,12 @@ class Morpheus::Cli::Clusters
     end
     opts.on('--hostname VALUE', String, "Hostname") do |val|
       options[:hostname] = val
+    end
+    opts.on('--default-repo-account VALUE', String, "Default Repo Account") do |val|
+      options[:default_repo] = val
+    end
+    opts.on("--image-server [on|off]", ['on','off'], "Act As Image Server") do |val|
+      options[:image_server] = ['true','on','1',''].include?(val.to_s)
     end
   end
 
