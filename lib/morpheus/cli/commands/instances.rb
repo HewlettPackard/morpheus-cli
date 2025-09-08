@@ -2704,7 +2704,7 @@ class Morpheus::Cli::Instances
       return nil
     end
     zone_pools_dropdown = zone_pools.collect {|zp| {'name' => zp['name'], 'value' => zp['id']} }
-    # validate input if any
+    # validate input if given
     if options[:resource_pool]
       selected_resource_pool_id = options[:resource_pool].to_i
       selected_pool = zone_pools.find {|zp| zp['id'] == selected_resource_pool_id }
@@ -2729,7 +2729,7 @@ class Morpheus::Cli::Instances
        }],
       options[:options]
     )
-    selected_pool = zone_pools.find {|zp| zp['id'] == pool_prompt['resourcePool'].to_i }
+    selected_pool = zone_pools.find {|zp| zp['id'] == pool_prompt['resourcePool'] }
     if selected_pool.nil?
       print_red_alert "A Resource Pool is required to perform this action."
       return nil
@@ -2802,20 +2802,19 @@ class Morpheus::Cli::Instances
       raise_command_error "Instance Action '#{action_id}' not found."
     end
 
+    action_display_name = "#{instance_action['name']} [#{instance_action['code']}]"
     if action_id == 'generic-add-node' && instances.size > 1
-      raise_command_error "The 'generic-add-node' action can only be performed on a single instance at a time."
+      raise_command_error "The #{action_display_name} action can only be performed on a single instance at a time."
     end
 
-    action_display_name = "#{instance_action['name']} [#{instance_action['code']}]"    
     unless options[:yes] || ::Morpheus::Cli::OptionTypes::confirm("Are you sure you would like to perform action #{action_display_name} on #{id_list.size == 1 ? 'instance' : 'instances'} #{anded_list(id_list)}?", options)
       return 9, "aborted command"
     end
 
     selected_resource_pool_id = nil
-    pool_required = false
+    # Special handling for generic-add-node action to prompt for resource pool if needed.
     if action_id == 'generic-add-node'
       instance = instances[0]
-      # need to GET provision type for optionTypes, and other settings...
       layout = instance['layout']
       provision_type_code = layout['provisionTypeCode']
       provision_type = nil
