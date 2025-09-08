@@ -136,7 +136,7 @@ class Morpheus::InstancesInterface < Morpheus::APIClient
     execute(opts)
   end
 
-  def action(id, action_code, payload={})
+  def action(id, action_code, resource_pool_id=nil, payload={})
     url, params = "", {}
     if id.is_a?(Array)
       url = "#{@base_url}/api/instances/action"
@@ -144,6 +144,9 @@ class Morpheus::InstancesInterface < Morpheus::APIClient
     else
       url = "#{@base_url}/api/instances/#{id}/action"
       params = {code: action_code}
+    end
+    unless resource_pool_id
+      params['resource_pool_id'] = resource_pool_id
     end
     headers = { :params => params, :authorization => "Bearer #{@access_token}", 'Content-Type' => 'application/json' }
     opts = {method: :put, url: url, headers: headers, payload: payload.to_json}
