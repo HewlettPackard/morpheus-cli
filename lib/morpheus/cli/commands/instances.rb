@@ -53,7 +53,9 @@ class Morpheus::Cli::Instances
     @library_layouts_interface = @api_client.library_layouts
     @clouds_interface = @api_client.clouds
     @clouds_datastores_interface = @api_client.cloud_datastores
+    @cloud_resource_pools_interface = @api_client.cloud_resource_pools
     @servers_interface = @api_client.servers
+    @server_types_interface = @api_client.server_types
     @provision_types_interface = @api_client.provision_types
     @options_interface = @api_client.options
     @active_group_id = Morpheus::Cli::Groups.active_groups[@appliance_name]
@@ -2655,6 +2657,87 @@ class Morpheus::Cli::Instances
     end
   end
 
+  def find_server_type_by_id(id)
+    begin
+      json_response =@server_types_interface.get(id.to_i)
+      return json_response['serverType']
+    rescue RestClient::Exception => e
+      if e.response && e.response.code == 404
+        print_red_alert "Server Type not found by id #{id}"
+        return nil
+      else
+        raise e
+      end
+    end
+  end
+  private :find_server_type_by_id
+
+  # checks whether adding a node to the specified instance requires a resource pool input
+  def addnode_requires_resource_pool?(instance, provision_type)
+    return false unless provision_type && provision_type["hasZonePools"] && provision_type["zonePoolRequired"] && instance['servers']
+    instance['servers'].each do |server_id|
+      server = find_server_by_id(server_id)
+      next unless server
+      cst_id = server.dig('computeServerType', 'id')
+      cst = find_server_type_by_id(cst_id)
+      unless cst
+        print_red_alert "Server Type not found by id #{cst_id}"
+        return false
+      end
+      return true if cst['bareMetalHost']
+    end
+    false
+  end
+  private :addnode_requires_resource_pool?
+
+  # Prompts for a resource pool selection when adding a node to an instance.
+  # This is invoked during the Add Node action to choose a resource pool (eg. for HPE bare metal host provisioning types mandates a pool).
+  def addnode_prompt_for_resource_pool(instance, options)
+    zone_id = instance['cloud']['id']
+    if zone_id.nil?
+      print_red_alert "Instance #{instance['name']} does not have a cloud/zone assigned."
+      return nil
+    end
+    zone_pools = @cloud_resource_pools_interface.list(zone_id)['resourcePools']
+    if zone_pools.empty?
+      print_red_alert "No Resource Pools are defined for the instance's cloud #{instance['cloud']['name']}. This is required to perform this action."
+      return nil
+    end
+    zone_pools_dropdown = zone_pools.collect {|zp| {'name' => zp['name'], 'value' => zp['id']} }
+    # validate input if given
+    if options[:resource_pool]
+      selected_resource_pool_id = options[:resource_pool].to_i
+      selected_pool = zone_pools.find {|zp| zp['id'] == selected_resource_pool_id }
+      if selected_pool.nil?
+        print_red_alert "Resource Pool ID #{selected_resource_pool_id} is not valid for the instance's cloud."
+        return nil
+      end
+    end
+    # auto select single
+    if zone_pools.size == 1 && !selected_resource_pool_id
+      selected_resource_pool_id = zone_pools[0]['id']
+    end
+    pool_prompt = Morpheus::Cli::OptionTypes.prompt(
+      [{
+         'fieldName' => 'resourcePool',
+         'type' => 'select',
+         'fieldLabel' => 'Resource Pool',
+         'selectOptions' => zone_pools_dropdown,
+         'required' => true,
+         'defaultValue' => selected_resource_pool_id,
+         'description' => 'Choose the Resource Pool to use for this action'
+       }],
+      options[:options]
+    )
+    selected_pool = zone_pools.find {|zp| zp['id'] == pool_prompt['resourcePool'] }
+    if selected_pool.nil?
+      print_red_alert "A Resource Pool is required to perform this action."
+      return nil
+    end
+    selected_resource_pool_id = selected_pool['id']
+  end
+  private :addnode_prompt_for_resource_pool
+
   def action(args)
     options = {}
     action_id = nil
@@ -2662,6 +2745,9 @@ class Morpheus::Cli::Instances
       opts.banner = subcommand_usage("[id list] -a CODE")
       opts.on('-a', '--action CODE', "Instance Action CODE to execute") do |val|
         action_id = val.to_s
+      end
+      opts.on( '--resource-pool ID', String, "Resource pool ID for Add node action" ) do |val|
+        options[:resource_pool] = val
       end
       build_common_options(opts, options, [:auto_confirm, :json, :dry_run, :quiet, :remote])
       opts.footer = "Execute an action for one or many instances."
@@ -2716,20 +2802,46 @@ class Morpheus::Cli::Instances
       raise_command_error "Instance Action '#{action_id}' not found."
     end
 
-    action_display_name = "#{instance_action['name']} [#{instance_action['code']}]"    
+    action_display_name = "#{instance_action['name']} [#{instance_action['code']}]"
+    if action_id == 'generic-add-node' && instances.size > 1
+      raise_command_error "The #{action_display_name} action can only be performed on a single instance at a time."
+    end
+
     unless options[:yes] || ::Morpheus::Cli::OptionTypes::confirm("Are you sure you would like to perform action #{action_display_name} on #{id_list.size == 1 ? 'instance' : 'instances'} #{anded_list(id_list)}?", options)
       return 9, "aborted command"
     end
 
+    selected_resource_pool_id = nil
+    # Special handling for generic-add-node action to prompt for resource pool if needed.
+    if action_id == 'generic-add-node'
+      instance = instances[0]
+      layout = instance['layout']
+      provision_type_code = layout['provisionTypeCode']
+      provision_type = nil
+      if provision_type_code
+        provision_type = provision_types_interface.list({code:provision_type_code})['provisionTypes'][0]
+        if provision_type.nil?
+          print_red_alert "Provision Type not found by code #{provision_type_code}"
+          return 1
+        end
+      end
+
+      # Check if instance containers are of 'baremetalhost' type, if so, then only prompt for resource pool.
+      pool_required = addnode_requires_resource_pool?(instance, provision_type)
+      if pool_required
+        selected_resource_pool_id = addnode_prompt_for_resource_pool(instance, options )
+        return 1 if selected_resource_pool_id.nil?
+      end
+    end # End of generic-add-node special handling
     # return run_command_for_each_arg(containers) do |arg|
     #   _action(arg, action_id, options)
     # end
     @instances_interface.setopts(options)
     if options[:dry_run]
-      print_dry_run @instances_interface.dry.action(instance_ids, action_id)
+      print_dry_run @instances_interface.dry.action(instance_ids, action_id, selected_resource_pool_id)
       return 0
     end
-    json_response = @instances_interface.action(instance_ids, action_id)
+    json_response = @instances_interface.action(instance_ids, action_id, selected_resource_pool_id)
     # just assume json_response["success"] == true,  it always is with 200 OK
     if options[:json]
       puts as_json(json_response, options)
@@ -2937,7 +3049,7 @@ class Morpheus::Cli::Instances
       opts.footer = <<-EOT
 Create a snapshot for an instance.
 [instance] is required. This is the name or id of an instance
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:1)
@@ -3067,7 +3179,7 @@ EOT
 Cancel removal of an instance.
 This is a way to undo delete of an instance still pending removal.
 [instance] is required. This is the name or id of an instance
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:1)
@@ -3098,7 +3210,7 @@ EOT
       opts.footer = <<-EOT
 Cancel expiration of an instance.
 [instance] is required. This is the name or id of an instance
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:1)
@@ -3129,7 +3241,7 @@ EOT
       opts.footer = <<-EOT
 Cancel shutdown for an instance.
 [instance] is required. This is the name or id of an instance
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:1)
@@ -3160,7 +3272,7 @@ EOT
       opts.footer = <<-EOT
 Extend expiration for an instance.
 [instance] is required. This is the name or id of an instance
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:1)
@@ -3191,7 +3303,7 @@ EOT
       opts.footer = <<-EOT
 Extend shutdown for an instance.
 [instance] is required. This is the name or id of an instance
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:1)
@@ -3437,7 +3549,7 @@ Run workflow for an instance.
 By default the provision phase is executed.
 Use the --phase option to execute a different phase.
 The available phases are start, stop, preProvision, provision, postProvision, preDeploy, deploy, reconfigure, teardown, startup and shutdown.
-EOT
+      EOT
     end
     optparse.parse!(args)
     if args.count != 2
@@ -3505,7 +3617,7 @@ EOT
 List snapshots for an instance.
 [instance] is required. This is the name or id of an instance
 [snapshot] is optional. this is the name or id a snapshot to filter by.
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, min:1, max: 2)
@@ -4001,7 +4113,7 @@ EOT
       opts.footer = <<-EOT
 List instance scaling threshold schedules.
 [instance] is required. This is the name or id of an instance
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:1)
@@ -4045,7 +4157,7 @@ EOT
 Get details about an instance scaling threshold schedule.
 [instance] is required. This is the name or id of an instance
 [schedule] is required. This is id of an instance schedule
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:2)
@@ -4084,7 +4196,7 @@ EOT
       opts.footer = <<-EOT
 Update an existing instance scaling threshold schedule
 [instance] is required. This is the name or id of an instance
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:1)
@@ -4145,7 +4257,7 @@ EOT
 Update an existing instance scaling threshold schedule.
 [instance] is required. This is the name or id of an instance
 [schedule] is required. This is id of an instance schedule
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:2)
@@ -4205,7 +4317,7 @@ EOT
 Delete an existing instance scaling threshold schedule
 [instance] is required. This is the name or id of an instance
 [schedule] is required. This is id of an instance schedule
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:2)
@@ -4769,7 +4881,7 @@ EOT
 List deployments for an instance.
 [instance] is required. This is the name or id of an instance
 [search] is optional. Filters on deployment version identifier
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, min:1)
@@ -4827,7 +4939,7 @@ EOT
       opts.footer = <<-EOT
 Clone to image (template) for an instance
 [instance] is required. This is the name or id of an instance
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:1)
@@ -4899,7 +5011,7 @@ EOT
       opts.footer = <<-EOT
 Lock an instance
 [instance] is required. This is the name or id of an instance
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:1)
@@ -4933,7 +5045,7 @@ EOT
       opts.footer = <<-EOT
 Unlock an instance
 [instance] is required. This is the name or id of an instance
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:1)
@@ -4968,7 +5080,7 @@ EOT
 Refresh an instance.
 [instance] is required. This is the name or id of an instance.
 This is only supported by certain types of instances such as terraform.
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:1)
@@ -5017,7 +5129,7 @@ Prepare to apply an instance.
 [instance] is required. This is the name or id of an instance.
 Displays the current configuration data used by the apply command.
 This is only supported by certain types of instances such as terraform.
-EOT
+      EOT
     end
     optparse.parse!(args)
     if args.count != 1
@@ -5090,7 +5202,7 @@ This is only supported by certain types of instances such as terraform.
 By default this executes two requests to validate and then apply the changes.
 The first request corresponds to the terraform plan command only.
 Use --no-validate to skip this step apply changes in one step.
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:1)
@@ -5240,7 +5352,7 @@ EOT
 View state of an instance.
 [instance] is required. This is the name or id of an instance.
 This is only supported by certain types of apps such as terraform.
-EOT
+      EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:1)
