@@ -7,7 +7,7 @@ class Morpheus::Cli::StorageVolumes
 
   set_command_name :'storage-volumes'
   set_command_description "View and manage storage volumes."
-  register_subcommands %w{list get add remove}
+  register_subcommands :list, :get, :add, :remove, :resize
 
   # RestCommand settings
   register_interfaces :storage_volumes, :storage_volume_types
@@ -80,6 +80,12 @@ class Morpheus::Cli::StorageVolumes
     ]
   end
 
+  def resize_storage_volume_option_types()
+    [
+      {'fieldName' => 'maxStorage', 'fieldLabel' => 'New Size', 'type' => 'number', 'required' => true},
+    ]
+  end
+
   def load_option_types_for_storage_volume(type_record, parent_record)
     storage_volume_type = type_record
     option_types = storage_volume_type['optionTypes']
@@ -92,6 +98,64 @@ class Morpheus::Cli::StorageVolumes
       end
     end
     return option_types
+  end
+
+  def resize(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[name]")
+      build_common_options(opts, options, [:options, :json, :dry_run, :quiet, :remote])
+    end
+    optparse.parse!(args)
+    if args.count < 1
+      puts optparse
+      exit 1
+    end
+    connect(options)
+    begin
+      volume = find_volume_by_name_or_id(args[0])
+      payload = {}
+      id = volume['id'].to_i
+      v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'size', 'type' => 'number', 'fieldLabel' => "Volume Size (bytes)", 'required' => true, 'description' => 'Enter a volume size (bytes).', 'defaultValue' => volume['maxStorage']}], options[:options])
+      payload['maxStorage'] = v_prompt['size'].to_i
+      @storage_volumes_interface.resize(id, payload)
+    end
+  end
+
+  def find_volume_by_id(id)
+    begin
+      json_response = @storage_volumes_interface.get(id.to_i)
+      return json_response['storageVolume']
+    rescue RestClient::Exception => e
+      if e.response && e.response.code == 404
+        print_red_alert "Volume not found by id #{id}"
+        exit 1
+      else
+        raise e
+      end
+    end
+  end
+
+  def find_volume_by_name(name)
+    results = @storage_volumes_interface.list({name: name})
+    if results['storageVolumes'].empty?
+      print_red_alert "Volume not found by name #{name}"
+      exit 1
+    elsif results['storageVolumes'].size > 1
+      print_red_alert "Multiple Volumes exist with the name '#{name}'"
+      puts_error as_pretty_table(results['storageVolumes'], [:id, :name], {color:red})
+      print_red_alert "Try using ID instead"
+      exit 1
+    end
+    return results['storageVolumes'][0]
+  end
+
+  def find_volume_by_name_or_id(val)
+    if val.to_s =~ /\A\d{1,}\Z/
+      return find_volume_by_id(val)
+    else
+      return find_volume_by_name(val)
+    end
   end
 
 end
