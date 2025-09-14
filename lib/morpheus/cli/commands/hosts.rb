@@ -1415,19 +1415,19 @@ class Morpheus::Cli::Hosts
     end
   end
 
-  def prompt_instance_version_and_layout(instance_type, group_id, cloud_id, options={})
+  # Prompt for instance version and layout based on instance type.
+  def prompt_make_managed_instance_options(instance_type, group_id, cloud_id, options={})
     selected_version_value = nil
     opt_bucket = options[:options] || {}
-    api_client = options[:api_client] || @api_client
 
-    # fetch available versions for this instance type
+    # available versions for this instance type
     version_source_params = {groupId: group_id, cloudId: cloud_id, instanceTypeId: instance_type['id']}
     available_versions = options_interface.options_for_source('instanceVersions', version_source_params)['data'] || []
     # filter out versions that have no layouts
     available_versions.reject! { |ver| ver['layouts'].nil? || ver['layouts'].empty? }
     available_versions.sort! { |x,y| x['name']<=> y['name'] }
 
-    # Prompt for version
+    # prompt for version
     if available_versions.size == 1
        selected_version_value = available_versions.first['value']
     elsif !available_versions.empty?
@@ -1448,6 +1448,7 @@ class Morpheus::Cli::Hosts
        selected_version_value = version_prompt['version'] unless version_prompt['version'].to_s.empty?
     end
 
+    # filter layouts that support the selected version and are unmanaged or support convert to managed
     layouts_for_version = (instance_type['instanceTypeLayouts'] || []).select { |layout|
       (layout['instanceVersion'] == selected_version_value) &&
       (layout['supportsConvertToManaged'] == true || layout['serverType'] == 'unmanaged')
@@ -1458,7 +1459,6 @@ class Morpheus::Cli::Hosts
       return nil
     end
 
-    # Prompt for layout from the layouts available in layouts_for_version
     layout_options = layouts_for_version.collect { |layout|
       {'name' => layout['name'], 'value' => layout['id']}
     }
@@ -1477,7 +1477,7 @@ class Morpheus::Cli::Hosts
     chosen_layout_id = layout_prompt['layout']
     {'instanceVersion' => selected_version_value, 'instanceLayoutId' => chosen_layout_id}
   end
-  private :prompt_instance_version_and_layout
+  private :prompt_make_managed_instance_options
 
   def make_managed(args)
     options = {}
@@ -1490,8 +1490,8 @@ class Morpheus::Cli::Hosts
       opts.on('-g', '--group GROUP', String, "Group to assign to new instance.") do |val|
         options[:group] = val
       end
-      opts.on('--instance-type ID', String, "Instance Type ID or Name for the new instance.") do |val|
-         options['instanceType'] = val
+      opts.on('--instance-type ID', String, "Instance Type ID or Name for the new instance. Optional - only specify if you want to set a specific instance type for conversion.") do |val|
+        options['instanceType'] = val
       end
       build_common_options(opts, options, [:options, :json, :dry_run, :quiet, :remote])
     end
@@ -1536,18 +1536,18 @@ class Morpheus::Cli::Hosts
       unless options['instanceType'].nil?
         instance_type = find_instance_type_by_name_or_id(options['instanceType'])
         if instance_type.nil?
-          print_red_alert "Instance Type not found by name or id #{options['instanceTypeId']}"
+          print_red_alert "Instance Type not found by name or id #{options['instanceType']}"
           return 1
         end
         if instance_type['active'] != true
-          print_red_alert "Instance Type #{instance_type['name']} is not active"
+          print_red_alert "Instance Type '#{options['instanceType']}' (#{instance_type['name']}) is not active"
           return 1
         end
-        resp=prompt_instance_version_and_layout(instance_type,
+        resp=prompt_make_managed_instance_options(instance_type,
                                            params['provisionSiteId'] || host['siteId'], (host['zoneId'] || host['zone']['id']),
-                                           {options: options, api_client: @api_client})
+                                                  {options: options, api_client: @api_client})
         if resp.nil?
-          print_red_alert "Failed to select instance version and layout"
+          print_red_alert "Failed to select instance version and layout for given instance type '#{instance_type['name']}'"
           return 1
         end
         payload['instanceTypeId'] = instance_type['id']
