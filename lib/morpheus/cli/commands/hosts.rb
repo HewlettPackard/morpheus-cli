@@ -839,8 +839,6 @@ class Morpheus::Cli::Hosts
           exit 1
         end
 
-        print_red_alert "Server Type #{server_type_code} for cloud #{cloud['name']}: #{server_type['computeTypeCode']}"
-
         # Server Name
         host_name = nil
         if options[:host_name]
