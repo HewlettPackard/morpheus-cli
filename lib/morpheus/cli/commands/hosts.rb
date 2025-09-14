@@ -897,7 +897,9 @@ class Morpheus::Cli::Hosts
           resource_pool_option_type = option_type_list.find {|opt| ['resourcePool','resourcePoolId','azureResourceGroupId'].include?(opt['fieldName']) }
           option_type_list = option_type_list.reject {|opt| ['resourcePool','resourcePoolId','azureResourceGroupId'].include?(opt['fieldName']) }
           resource_pool_option_type ||= {'fieldContext' => 'config', 'fieldName' => 'resourcePool', 'type' => 'select', 'fieldLabel' => 'Resource Pool', 'optionSource' => 'zonePools', 'required' => true, 'skipSingleOption' => true, 'description' => 'Select resource pool.'}
-          resource_pool_prompt = Morpheus::Cli::OptionTypes.prompt([resource_pool_option_type],options[:options],api_client,{groupId: group_id, siteId: group_id, zoneId: cloud_id, cloudId: cloud_id, planId: service_plan["id"], serverTypeId: server_type['id']})
+          context_params = {groupId: group_id, siteId: group_id, zoneId: cloud_id, cloudId: cloud_id, serverTypeId: server_type['id']}
+          context_params[:planId] = service_plan['id'] if defined?(service_plan) && service_plan
+          resource_pool_prompt = Morpheus::Cli::OptionTypes.prompt([resource_pool_option_type], options[:options], api_client, context_params)
           resource_pool_prompt.deep_compact!
           payload.deep_merge!(resource_pool_prompt)
           if resource_pool_option_type['fieldContext'] && resource_pool_prompt[resource_pool_option_type['fieldContext']]
@@ -1413,6 +1415,70 @@ class Morpheus::Cli::Hosts
     end
   end
 
+  def prompt_instance_version_and_layout(instance_type, group_id, cloud_id, options={})
+    selected_version_value = nil
+    opt_bucket = options[:options] || {}
+    api_client = options[:api_client] || @api_client
+
+    # fetch available versions for this instance type
+    version_source_params = {groupId: group_id, cloudId: cloud_id, instanceTypeId: instance_type['id']}
+    available_versions = options_interface.options_for_source('instanceVersions', version_source_params)['data'] || []
+    # filter out versions that have no layouts
+    available_versions.reject! { |ver| ver['layouts'].nil? || ver['layouts'].empty? }
+    available_versions.sort! { |x,y| x['name']<=> y['name'] }
+
+    # Prompt for version
+    if available_versions.size == 1
+       selected_version_value = available_versions.first['value']
+    elsif !available_versions.empty?
+       default_version = (available_versions.first['value'] rescue nil)
+       version_required = available_versions.size > 1
+       version_prompt = Morpheus::Cli::OptionTypes.prompt(
+            [{
+               'fieldName'     => 'version',
+               'type'          => 'select',
+               'fieldLabel'    => 'Version',
+               'selectOptions' => available_versions,
+               'required'      => version_required,
+               'defaultValue'  => default_version,
+               'description'  => 'Instance Type Version'
+            }],
+            opt_bucket
+          )
+       selected_version_value = version_prompt['version'] unless version_prompt['version'].to_s.empty?
+    end
+
+    layouts_for_version = (instance_type['instanceTypeLayouts'] || []).select { |layout|
+      (layout['instanceVersion'] == selected_version_value) &&
+      (layout['supportsConvertToManaged'] == true || layout['serverType'] == 'unmanaged')
+    }
+
+    if layouts_for_version.empty?
+      print_red_alert "No available layouts for instance type '#{instance_type['name']}' and version '#{selected_version_value}'"
+      return nil
+    end
+
+    # Prompt for layout from the layouts available in layouts_for_version
+    layout_options = layouts_for_version.collect { |layout|
+      {'name' => layout['name'], 'value' => layout['id']}
+    }
+    layout_prompt = Morpheus::Cli::OptionTypes.prompt(
+      [{
+         'fieldName'    => 'layout',
+         'type'         => 'select',
+         'fieldLabel'   => 'Layout',
+         'selectOptions' => layout_options,
+         'required'     => true,
+         'skipSingleOption' => true,
+         'description'  => 'Choose a layout (template) for this instance.'
+       }],
+      opt_bucket
+    )
+    chosen_layout_id = layout_prompt['layout']
+    {'instanceVersion' => selected_version_value, 'instanceLayoutId' => chosen_layout_id}
+  end
+  private :prompt_instance_version_and_layout
+
   def make_managed(args)
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
@@ -1424,9 +1490,9 @@ class Morpheus::Cli::Hosts
       opts.on('-g', '--group GROUP', String, "Group to assign to new instance.") do |val|
         options[:group] = val
       end
-      # opts.on('--instance-type-id ID', String, "Instance Type ID for the new instance.") do |val|
-      #   options['instanceTypeId'] = val.to_s == 'on' || val.to_s == 'true' || val.to_s == ''
-      # end
+      opts.on('--instance-type ID', String, "Instance Type ID or Name for the new instance.") do |val|
+         options['instanceType'] = val
+      end
       build_common_options(opts, options, [:options, :json, :dry_run, :quiet, :remote])
     end
     optparse.parse!(args)
@@ -1461,11 +1527,34 @@ class Morpheus::Cli::Hosts
         params['provisionSiteId'] = group['id']
       end
       payload['server'].merge!(params)
-      ['installAgent','instanceTypeId'].each do |k|
+      ['installAgent'].each do |k|
         if options[k] != nil
           payload[k] = options[k]
         end
       end
+      # If instance type is passed, prompt for version and layout
+      unless options['instanceType'].nil?
+        instance_type = find_instance_type_by_name_or_id(options['instanceType'])
+        if instance_type.nil?
+          print_red_alert "Instance Type not found by name or id #{options['instanceTypeId']}"
+          return 1
+        end
+        if instance_type['active'] != true
+          print_red_alert "Instance Type #{instance_type['name']} is not active"
+          return 1
+        end
+        resp=prompt_instance_version_and_layout(instance_type,
+                                           params['provisionSiteId'] || host['siteId'], (host['zoneId'] || host['zone']['id']),
+                                           {options: options, api_client: @api_client})
+        if resp.nil?
+          print_red_alert "Failed to select instance version and layout"
+          return 1
+        end
+        payload['instanceTypeId'] = instance_type['id']
+        payload['layout'] = resp['instanceLayoutId']
+        payload['version'] = resp['instanceVersion']
+      end
+
       @servers_interface.setopts(options)
       if options[:dry_run]
         print_dry_run(@servers_interface.dry.make_managed(host['id'], payload), options)
