@@ -856,8 +856,10 @@ class Morpheus::Cli::Hosts
           'computeServerType' => {'id' => server_type['id']},
         }})
 
-        # Service plans do not apply during bare-metal server imports
-        has_service_plans=!server_type['bareMetalHost']
+        is_baremetal_host = server_type['bareMetalHost']
+
+        # Service plans do not apply during  BareMetal server imports
+        has_service_plans = !is_baremetal_host
 
         # uh ok, this actually expects config at root level, sibling of server
         # payload.deep_merge!({'server' => passed_options}) unless passed_options.empty?
@@ -869,6 +871,9 @@ class Morpheus::Cli::Hosts
           plan_prompt = Morpheus::Cli::OptionTypes.prompt([{ 'fieldName' => 'plan', 'type' => 'select', 'fieldLabel' => 'Plan', 'selectOptions' => service_plans_dropdown, 'required' => true, 'description' => 'Choose the appropriately sized plan for this server' }], options[:options])
           service_plan = service_plans.find { |sp| sp["id"] == plan_prompt['plan'].to_i }
           payload['server']['plan'] = {'id' => service_plan['id']}
+          service_plan_id = service_plan['id']
+        else
+          service_plan_id = ""
         end
 
         option_type_list = server_type['optionTypes']
@@ -897,7 +902,7 @@ class Morpheus::Cli::Hosts
           resource_pool_option_type = option_type_list.find {|opt| ['resourcePool','resourcePoolId','azureResourceGroupId'].include?(opt['fieldName']) }
           option_type_list = option_type_list.reject {|opt| ['resourcePool','resourcePoolId','azureResourceGroupId'].include?(opt['fieldName']) }
           resource_pool_option_type ||= {'fieldContext' => 'config', 'fieldName' => 'resourcePool', 'type' => 'select', 'fieldLabel' => 'Resource Pool', 'optionSource' => 'zonePools', 'required' => true, 'skipSingleOption' => true, 'description' => 'Select resource pool.'}
-          resource_pool_prompt = Morpheus::Cli::OptionTypes.prompt([resource_pool_option_type],options[:options],api_client,{groupId: group_id, siteId: group_id, zoneId: cloud_id, cloudId: cloud_id, planId: service_plan["id"], serverTypeId: server_type['id']})
+          resource_pool_prompt = Morpheus::Cli::OptionTypes.prompt([resource_pool_option_type],options[:options],api_client,{groupId: group_id, siteId: group_id, zoneId: cloud_id, cloudId: cloud_id, planId: service_plan_id, serverTypeId: server_type['id']})
           resource_pool_prompt.deep_compact!
           payload.deep_merge!(resource_pool_prompt)
           if resource_pool_option_type['fieldContext'] && resource_pool_prompt[resource_pool_option_type['fieldContext']]
@@ -922,7 +927,8 @@ class Morpheus::Cli::Hosts
         end
 
         # prompt for network interfaces (if supported)
-        if server_type["provisionType"] && server_type["provisionType"]["id"] && server_type["provisionType"]["hasNetworks"]
+        # Does not apply during BareMetal server imports
+        if !is_baremetal_host && server_type["provisionType"] && server_type["provisionType"]["id"] && server_type["provisionType"]["hasNetworks"]
           begin
             network_interfaces = prompt_network_interfaces(cloud['id'], server_type["provisionType"]["id"], pool_id, options)
             if !network_interfaces.empty?
