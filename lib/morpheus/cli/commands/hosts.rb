@@ -1455,7 +1455,7 @@ class Morpheus::Cli::Hosts
     }
 
     if layouts_for_version.empty?
-      print_red_alert "No available layouts for instance type '#{instance_type['name']}' and version '#{selected_version_value}'"
+      print_red_alert "No available layouts that support converting to managed for the given instance type"
       return nil
     end
 
@@ -1469,7 +1469,7 @@ class Morpheus::Cli::Hosts
          'fieldLabel'   => 'Layout',
          'selectOptions' => layout_options,
          'required'     => true,
-         'skipSingleOption' => true,
+         'defaultValue' => layout_options.first['name'],
          'description'  => 'Choose a layout (template) for this instance.'
        }],
       opt_bucket
