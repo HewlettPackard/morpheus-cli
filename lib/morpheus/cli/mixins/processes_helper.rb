@@ -28,9 +28,15 @@ module Morpheus::Cli::ProcessesHelper
       "Start Date" => lambda {|it| format_local_dt(it['startDate']) },
       "End Date" => lambda {|it| format_local_dt(it['endDate']) },
       "Duration" => lambda {|it| format_process_duration(it) },
+    }
+    if process['message'].to_s.strip != ''
+      description_cols.merge!({ "Message" => lambda {|it| it['message']}
+      })
+    end
+    description_cols.merge!({
       "Status" => lambda {|it| format_process_status(it) },
       # "# Events" => lambda {|it| (it['events'] || []).size() },
-    }
+    })
     print_description_list(description_cols, process, options)
 
     if process['error']
