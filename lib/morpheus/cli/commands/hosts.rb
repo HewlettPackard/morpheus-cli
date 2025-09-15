@@ -862,6 +862,7 @@ class Morpheus::Cli::Hosts
         # uh ok, this actually expects config at root level, sibling of server
         # payload.deep_merge!({'server' => passed_options}) unless passed_options.empty?
         # prompt for service plan
+        service_plan = nil
         if has_service_plans
           service_plans_json = @servers_interface.service_plans({ zoneId: cloud['id'], serverTypeId: server_type["id"] })
           service_plans = service_plans_json["plans"]
@@ -897,9 +898,7 @@ class Morpheus::Cli::Hosts
           resource_pool_option_type = option_type_list.find {|opt| ['resourcePool','resourcePoolId','azureResourceGroupId'].include?(opt['fieldName']) }
           option_type_list = option_type_list.reject {|opt| ['resourcePool','resourcePoolId','azureResourceGroupId'].include?(opt['fieldName']) }
           resource_pool_option_type ||= {'fieldContext' => 'config', 'fieldName' => 'resourcePool', 'type' => 'select', 'fieldLabel' => 'Resource Pool', 'optionSource' => 'zonePools', 'required' => true, 'skipSingleOption' => true, 'description' => 'Select resource pool.'}
-          context_params = {groupId: group_id, siteId: group_id, zoneId: cloud_id, cloudId: cloud_id, serverTypeId: server_type['id']}
-          context_params[:planId] = service_plan['id'] if defined?(service_plan) && service_plan
-          resource_pool_prompt = Morpheus::Cli::OptionTypes.prompt([resource_pool_option_type], options[:options], api_client, context_params)
+          resource_pool_prompt = Morpheus::Cli::OptionTypes.prompt([resource_pool_option_type],options[:options],api_client,{groupId: group_id, siteId: group_id, zoneId: cloud_id, cloudId: cloud_id, planId: service_plan ? service_plan["id"] : "", serverTypeId: server_type['id']})
           resource_pool_prompt.deep_compact!
           payload.deep_merge!(resource_pool_prompt)
           if resource_pool_option_type['fieldContext'] && resource_pool_prompt[resource_pool_option_type['fieldContext']]

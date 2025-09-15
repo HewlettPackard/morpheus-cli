@@ -799,6 +799,24 @@ class Morpheus::Cli::Clusters
             cluster_payload['lbInstances'] = [load_balancer_payload.compact!]
           end
         end
+        # convert sshHosts to array
+        if server_payload['sshHosts']
+          if server_payload['sshHosts'].is_a?(String)
+            server_payload['sshHosts'] = server_payload['sshHosts'].split(",").collect {|it| {"ip" => it} }
+          elsif server_payload['sshHosts'].is_a?(Object)
+            server_payload['sshHosts'] = [server_payload['sshHosts']]
+          elsif server_payload['sshHosts'].is_a?(Array)
+            server_payload['sshHosts'] = server_payload['sshHosts'].collect {|it| it.is_a?(String) ? {"ip" => it} : it }
+          end
+
+          # inject the optionalNames array into the sshHosts if present
+          if server_payload['optionalNames']
+            optional_names = server_payload['optionalNames'].is_a?(String) ? server_payload['optionalNames'].split(",") : [server_payload['optionalNames']].flatten
+            server_payload['sshHosts'].each_with_index do|host, i| 
+              host['name'] = optional_names[i].strip if optional_names[i]
+            end
+          end
+        end
 
         cluster_payload['server'] = server_payload
         payload = {'cluster' => cluster_payload}
