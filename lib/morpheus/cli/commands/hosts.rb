@@ -856,8 +856,10 @@ class Morpheus::Cli::Hosts
           'computeServerType' => {'id' => server_type['id']},
         }})
 
-        # Service plans do not apply during bare-metal server imports
-        has_service_plans=!server_type['bareMetalHost']
+        is_baremetal_host = server_type['bareMetalHost']
+
+        # Service plans do not apply during  BareMetal server imports
+        has_service_plans = !is_baremetal_host
 
         # uh ok, this actually expects config at root level, sibling of server
         # payload.deep_merge!({'server' => passed_options}) unless passed_options.empty?
@@ -923,7 +925,8 @@ class Morpheus::Cli::Hosts
         end
 
         # prompt for network interfaces (if supported)
-        if server_type["provisionType"] && server_type["provisionType"]["id"] && server_type["provisionType"]["hasNetworks"]
+        # Does not apply during BareMetal server imports
+        if !is_baremetal_host && server_type["provisionType"] && server_type["provisionType"]["id"] && server_type["provisionType"]["hasNetworks"]
           begin
             network_interfaces = prompt_network_interfaces(cloud['id'], server_type["provisionType"]["id"], pool_id, options)
             if !network_interfaces.empty?
