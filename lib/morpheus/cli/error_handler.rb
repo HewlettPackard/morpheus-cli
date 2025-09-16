@@ -192,6 +192,11 @@ class Morpheus::Cli::ErrorHandler
             @stderr.print reset
           end
         else
+          # quick parse only for msg display
+          response = (JSON.parse(e.response.to_s) rescue nil)
+          if response.is_a?(Hash) && response['success'] == false && response['msg']
+            @stderr.print red, response['msg'].to_s, reset, "\n"
+          end
           @stderr.puts "Use -V or --debug for more verbose debugging information."
         end
       end
