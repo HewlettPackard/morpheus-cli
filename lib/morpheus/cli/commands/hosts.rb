@@ -256,8 +256,8 @@ class Morpheus::Cli::Hosts
         rows = servers.collect {|server| 
           stats = server['stats']
           
-          if !stats['maxMemory']
-            stats['maxMemory'] = stats['usedMemory'] + stats['freeMemory']
+          if !stats['maxMemory'] && (stats['usedMemory'] || stats['freeMemory'])
+            stats['maxMemory'] = stats['usedMemory'].to_i + stats['freeMemory'].to_i
           end
           cpu_usage_str = !stats ? "" : generate_usage_bar((stats['usedCpu'] || stats['cpuUsage']).to_f, 100, {max_bars: 10})
           memory_usage_str = !stats ? "" : generate_usage_bar(stats['usedMemory'], stats['maxMemory'], {max_bars: 10})
