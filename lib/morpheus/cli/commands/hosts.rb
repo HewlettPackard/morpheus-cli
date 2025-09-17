@@ -1429,25 +1429,37 @@ class Morpheus::Cli::Hosts
     available_versions.reject! { |ver| ver['layouts'].nil? || ver['layouts'].empty? }
     available_versions.sort! { |x,y| x['name']<=> y['name'] }
 
+    selected_version_value=nil
+    # before calling version prompt
+    if opt_bucket[:options] && opt_bucket[:options]['version']
+      default_version = opt_bucket[:options]['version']
+      # ensure it's valid
+      unless available_versions.find {|av| av['name'].to_s == default_version.to_s }
+        raise_command_error "Invalid version option '#{default_version}' passed. Valid versions are: #{available_versions.collect {|av| av['name']}.join(', ')}"
+      end
+      selected_version_value = available_versions.find {|av| av['name'].to_s == default_version.to_s }['value']
+    end
+
     # prompt for version
-    if available_versions.size == 1
-       selected_version_value = available_versions.first['value']
-    elsif !available_versions.empty?
-       default_version = (available_versions.first['value'] rescue nil)
-       version_required = available_versions.size > 1
-       version_prompt = Morpheus::Cli::OptionTypes.prompt(
-            [{
-               'fieldName'     => 'version',
-               'type'          => 'select',
-               'fieldLabel'    => 'Version',
-               'selectOptions' => available_versions,
-               'required'      => version_required,
-               'defaultValue'  => default_version,
-               'description'  => 'Instance Type Version'
-            }],
-            opt_bucket
-          )
-       selected_version_value = version_prompt['version'] unless version_prompt['version'].to_s.empty?
+    unless selected_version_value
+      if available_versions.size == 1
+         selected_version_value = available_versions.first['value']
+      elsif !available_versions.empty?
+         default_version = (available_versions.first['value'] rescue nil)
+         version_prompt = Morpheus::Cli::OptionTypes.prompt(
+              [{
+                 'fieldName'     => 'version',
+                 'type'          => 'select',
+                 'fieldLabel'    => 'Version',
+                 'selectOptions' => available_versions,
+                 'required'      => true,
+                 'defaultValue'  => default_version,
+                 'description'  => 'Instance Type Version'
+              }],
+              opt_bucket
+            )
+         selected_version_value = version_prompt['version'] unless version_prompt['version'].to_s.empty?
+      end
     end
 
     # filter layouts that support the selected version and are unmanaged or support convert to managed
@@ -1464,19 +1476,37 @@ class Morpheus::Cli::Hosts
     layout_options = layouts_for_version.collect { |layout|
       {'name' => layout['name'], 'value' => layout['id']}
     }
-    layout_prompt = Morpheus::Cli::OptionTypes.prompt(
-      [{
-         'fieldName'    => 'layout',
-         'type'         => 'select',
-         'fieldLabel'   => 'Layout',
-         'selectOptions' => layout_options,
-         'required'     => true,
-         'defaultValue' => layout_options.first['name'],
-         'description'  => 'Choose a layout (template) for this instance.'
-       }],
-      opt_bucket
-    )
-    chosen_layout_id = layout_prompt['layout']
+
+    # before calling layout prompt
+    chosen_layout_id = nil
+    if opt_bucket[:options] && opt_bucket[:options]['layout']
+      default_layout = opt_bucket[:options]['layout']
+      unless layout_options.find {|lo| lo['name'].to_s == default_layout.to_s }
+        raise_command_error "Invalid layout option '#{default_layout}' passed. Valid layouts are: #{layout_options.collect {|lo| lo['name']}.join(', ')}"
+      end
+      chosen_layout_id = layout_options.find {|lo| lo['name'].to_s == default_layout.to_s }['value']
+    end
+
+    unless chosen_layout_id
+      if layout_options.size == 1
+        chosen_layout_id = layout_options.first['value']
+      else
+        layout_prompt = Morpheus::Cli::OptionTypes.prompt(
+          [{
+             'fieldName'     => 'layout',
+             'type'          => 'select',
+             'fieldLabel'    => 'Layout',
+             'selectOptions' => layout_options,
+             'required'      => true,
+             'defaultValue'  => layout_options.first['value'],
+             'description'   => 'Choose a layout (template) for this instance.'
+           }],
+          opt_bucket
+        )
+        chosen_layout_id = layout_prompt['layout']
+      end
+    end
+
     {'instanceVersion' => selected_version_value, 'instanceLayoutId' => chosen_layout_id}
   end
   private :prompt_make_managed_instance_options
