@@ -2705,8 +2705,8 @@ class Morpheus::Cli::Instances
     end
     zone_pools_dropdown = zone_pools.collect {|zp| {'name' => zp['name'], 'value' => zp['id']} }
     # validate input if given
-    if options[:resource_pool]
-      selected_resource_pool_id = options[:resource_pool].to_i
+    if options[:options] && options[:options]['resourcePool']
+      selected_resource_pool_id = options[:options]['resourcePool'].to_i
       selected_pool = zone_pools.find {|zp| zp['id'] == selected_resource_pool_id }
       if selected_pool.nil?
         print_red_alert "Resource Pool ID #{selected_resource_pool_id} is not valid for the instance's cloud."
@@ -2714,20 +2714,17 @@ class Morpheus::Cli::Instances
       end
     end
     # auto select single
-    if zone_pools.size == 1 && !selected_resource_pool_id
-      selected_resource_pool_id = zone_pools[0]['id']
-    end
     pool_prompt = Morpheus::Cli::OptionTypes.prompt(
-      [{
-         'fieldName' => 'resourcePool',
-         'type' => 'select',
-         'fieldLabel' => 'Resource Pool',
-         'selectOptions' => zone_pools_dropdown,
-         'required' => true,
-         'defaultValue' => selected_resource_pool_id,
-         'description' => 'Choose the Resource Pool to use for this action'
-       }],
-      options[:options]
+    [{
+       'fieldName' => 'resourcePool',
+       'type' => 'select',
+       'fieldLabel' => 'Resource Pool',
+       'selectOptions' => zone_pools_dropdown,
+       'required' => true,
+       'defaultValue' => zone_pools[0]['id'],
+       'description' => 'Choose the Resource Pool to use for this action'
+     }],
+    options[:options]
     )
     selected_pool = zone_pools.find {|zp| zp['id'] == pool_prompt['resourcePool'] }
     if selected_pool.nil?
@@ -2747,9 +2744,10 @@ class Morpheus::Cli::Instances
         action_id = val.to_s
       end
       opts.on( '--resource-pool ID', String, "Resource pool ID for Add node action" ) do |val|
-        options[:resource_pool] = val
+      options[:options] ||= {}
+      options[:options]['resourcePool'] = val
       end
-      build_common_options(opts, options, [:auto_confirm, :json, :dry_run, :quiet, :remote])
+      build_common_options(opts, options, [:auto_confirm, :json, :dry_run, :quiet, :remote,])
       opts.footer = "Execute an action for one or many instances."
     end
     optparse.parse!(args)

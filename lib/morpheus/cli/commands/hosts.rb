@@ -1419,7 +1419,6 @@ class Morpheus::Cli::Hosts
 
   # Prompt for instance version and layout based on instance type.
   def prompt_make_managed_instance_options(instance_type, group_id, cloud_id, options={})
-    selected_version_value = nil
     opt_bucket = options[:options] || {}
 
     # available versions for this instance type
@@ -1429,26 +1428,26 @@ class Morpheus::Cli::Hosts
     available_versions.reject! { |ver| ver['layouts'].nil? || ver['layouts'].empty? }
     available_versions.sort! { |x,y| x['name']<=> y['name'] }
 
-    # prompt for version
-    if available_versions.size == 1
-       selected_version_value = available_versions.first['value']
-    elsif !available_versions.empty?
-       default_version = (available_versions.first['value'] rescue nil)
-       version_required = available_versions.size > 1
-       version_prompt = Morpheus::Cli::OptionTypes.prompt(
-            [{
-               'fieldName'     => 'version',
-               'type'          => 'select',
-               'fieldLabel'    => 'Version',
-               'selectOptions' => available_versions,
-               'required'      => version_required,
-               'defaultValue'  => default_version,
-               'description'  => 'Instance Type Version'
-            }],
-            opt_bucket
-          )
-       selected_version_value = version_prompt['version'] unless version_prompt['version'].to_s.empty?
+    # validate version option
+    if opt_bucket['version']
+      selected_version = opt_bucket['version']
+      unless available_versions.find {|av| av['name'].to_s == selected_version.to_s }
+        raise_command_error "Invalid version option '#{selected_version}' passed. Valid versions are: #{available_versions.collect {|av| av['name']}.join(', ')}"
+      end
     end
+    # prompt for version
+    version_prompt = Morpheus::Cli::OptionTypes.prompt([{
+         'fieldName'     => 'version',
+         'type'          => 'select',
+         'fieldLabel'    => 'Version',
+         'selectOptions' => available_versions,
+         'required'      => true,
+         'defaultValue'  => available_versions.first ? available_versions.first['value'] : '',
+         'description'  => 'Instance Type Version'
+      }],
+      opt_bucket
+    )
+    selected_version_value = version_prompt['version']
 
     # filter layouts that support the selected version and are unmanaged or support convert to managed
     layouts_for_version = (instance_type['instanceTypeLayouts'] || []).select { |layout|
@@ -1464,19 +1463,29 @@ class Morpheus::Cli::Hosts
     layout_options = layouts_for_version.collect { |layout|
       {'name' => layout['name'], 'value' => layout['id']}
     }
+
+    # validate layout input option
+    if opt_bucket['layout']
+      default_layout = opt_bucket['layout']
+      unless layout_options.find {|lo| lo['name'].to_s == default_layout.to_s }
+        raise_command_error "Invalid layout option '#{default_layout}' passed. Valid layouts are: #{layout_options.collect {|lo| lo['name']}.join(', ')}"
+      end
+    end
+
     layout_prompt = Morpheus::Cli::OptionTypes.prompt(
       [{
-         'fieldName'    => 'layout',
-         'type'         => 'select',
-         'fieldLabel'   => 'Layout',
+         'fieldName'     => 'layout',
+         'type'          => 'select',
+         'fieldLabel'    => 'Layout',
          'selectOptions' => layout_options,
-         'required'     => true,
-         'defaultValue' => layout_options.first['name'],
-         'description'  => 'Choose a layout (template) for this instance.'
+         'required'      => true,
+         'defaultValue'  => layout_options.first ? layout_options.first['value'] : '',
+         'description'   => 'Choose a layout (template) for this instance.'
        }],
       opt_bucket
     )
     chosen_layout_id = layout_prompt['layout']
+
     {'instanceVersion' => selected_version_value, 'instanceLayoutId' => chosen_layout_id}
   end
   private :prompt_make_managed_instance_options
@@ -1545,9 +1554,8 @@ class Morpheus::Cli::Hosts
           print_red_alert "Instance Type '#{options['instanceType']}' (#{instance_type['name']}) is not active"
           return 1
         end
-        resp=prompt_make_managed_instance_options(instance_type,
-                                           params['provisionSiteId'] || host['siteId'], (host['zoneId'] || host['zone']['id']),
-                                                  {options: options, api_client: @api_client})
+        resp=prompt_make_managed_instance_options(instance_type, params['provisionSiteId'] || host['siteId'],
+                                                  (host['zoneId'] || host['zone']['id']), options)
         if resp.nil?
           print_red_alert "Failed to select instance version and layout for given instance type '#{instance_type['name']}'"
           return 1
