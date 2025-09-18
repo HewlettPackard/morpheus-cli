@@ -1442,7 +1442,7 @@ class Morpheus::Cli::Hosts
          'fieldLabel'    => 'Version',
          'selectOptions' => available_versions,
          'required'      => true,
-         'defaultValue'  => available_versions.first['value'] || '',
+         'defaultValue'  => available_versions.first ? available_versions.first['value'] : '',
          'description'  => 'Instance Type Version'
       }],
       opt_bucket
@@ -1479,7 +1479,7 @@ class Morpheus::Cli::Hosts
          'fieldLabel'    => 'Layout',
          'selectOptions' => layout_options,
          'required'      => true,
-         'defaultValue'  => layout_options.first['value'],
+         'defaultValue'  => layout_options.first ? layout_options.first['value'] : '',
          'description'   => 'Choose a layout (template) for this instance.'
        }],
       opt_bucket
