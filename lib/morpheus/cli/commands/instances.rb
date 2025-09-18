@@ -2747,7 +2747,7 @@ class Morpheus::Cli::Instances
       options[:options] ||= {}
       options[:options]['resourcePool'] = val
       end
-      build_common_options(opts, options, [:auto_confirm, :json, :dry_run, :quiet, :remote, :options,])
+      build_common_options(opts, options, [:auto_confirm, :json, :dry_run, :quiet, :remote,])
       opts.footer = "Execute an action for one or many instances."
     end
     optparse.parse!(args)
