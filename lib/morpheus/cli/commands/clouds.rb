@@ -244,10 +244,7 @@ class Morpheus::Cli::Clouds
       build_common_options(opts, options, [:options, :payload, :json, :dry_run, :remote])
     end
     optparse.parse!(args)
-    # if args.count < 1
-    #   puts optparse
-    #   exit 1
-    # end
+    verify_args!(args:args, optparse:optparse, max:1)
     connect(options)
 
     begin
@@ -258,10 +255,12 @@ class Morpheus::Cli::Clouds
       else
         cloud_payload = {name: args[0], description: params[:description]}
         cloud_payload.deep_merge!(parse_passed_options(options))
+        # Group
         # use active group by default
         params[:group] ||= @active_group_id
-
-        # Group
+        if options[:options]['group']
+          params[:group] = options[:options]['group']
+        end
         group_id = nil
         group = params[:group] ? find_group_by_name_or_id_for_provisioning(params[:group]) : nil
         if group
@@ -274,22 +273,22 @@ class Morpheus::Cli::Clouds
           group_id = group_prompt['group']
         end
         cloud_payload['groupId'] = group_id
+        cloud_payload.delete('group')
         # todo: pass groups as an array instead
 
         # Cloud Name
         if args[0]
-          cloud_payload[:name] = args[0]
+          cloud_payload['name'] = args[0]
           options[:options]['name'] = args[0] # to skip prompt
-        elsif !options[:no_prompt]
-          # name_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text', 'required' => true}], options[:options])
-          # cloud_payload[:name] = name_prompt['name']
         end
+        # name_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text', 'required' => true}], options[:options])
+        # cloud_payload['name'] = name_prompt['name']
 
         # Cloud Type
         cloud_type = nil
         if params[:zone_type]
           cloud_type = cloud_type_for_name(params[:zone_type])
-        elsif !options[:no_prompt]
+        else
           # print_red_alert "Cloud Type not found or specified!"
           # exit 1
           cloud_types_dropdown = cloud_types_for_dropdown
@@ -301,7 +300,8 @@ class Morpheus::Cli::Clouds
           print_red_alert "A cloud type is required."
           exit 1
         end
-        cloud_payload[:zoneType] = {code: cloud_type['code']}
+        cloud_payload.delete('type')
+        cloud_payload['zoneType'] = {'code' => cloud_type['code']}
 
         cloud_payload['config'] ||= {}
         if params[:certificate_provider]
