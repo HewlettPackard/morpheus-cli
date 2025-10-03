@@ -716,7 +716,7 @@ module Morpheus
             end
           else
             found_default_option = select_options.find {|opt| opt[value_field].to_s == default_value.to_s || opt['name'] == default_value.to_s}
-            found_default_option = select_options.find {|opt| opt[value_field].to_s.start_with?(default_value.to_s) || opt['name'].to_s.start_with?(default_value.to_s)} if !found_default_option
+            #found_default_option = select_options.find {|opt| opt[value_field].to_s.start_with?(default_value.to_s) || opt['name'].to_s.start_with?(default_value.to_s)} if !found_default_option
             if found_default_option
               default_value = found_default_option['name'] # name is prettier than value
             end
