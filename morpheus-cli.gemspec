@@ -19,6 +19,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.required_ruby_version = '>= 2.5.1' # according to http.rb doc
+  spec.add_dependency "tins", '~> 1.43.0'
   spec.add_dependency "public_suffix", "4.0.7" # https://github.com/weppos/publicsuffix-ruby/blob/main/CHANGELOG.md
   spec.add_dependency "ffi", "1.15.5" # Fix for mismatched deps: https://github.com/ffi/ffi/issues/1103
   spec.add_development_dependency "bundler", "~> 2.2"
