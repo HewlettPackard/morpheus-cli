@@ -226,26 +226,33 @@ class Morpheus::Cli::StorageProvidersCommand
           storage_provider_type_code = v_prompt['providerType'] unless v_prompt['providerType'].nil?
         end
         if storage_provider_type_code == 'amazonS3'
-          payload['storageBucket']['providerType'] = '12'  # cloud provided amazonS3
+          payload['storageBucket']['providerType'] = 's3'  # cloud provided amazonS3
         else
           payload['storageBucket']['providerType'] = storage_provider_type_code
         end
 
         # Storage Service (only for amazonS3)
-        storage_service_code = nil
+        storage_server_type_id = nil
+        storage_server_id = nil
         if storage_provider_type_code == 'amazonS3'
+          storage_server_type = @api_client.storage_server_types.list({max:1000})['storageServerTypes'].find {|it| it['code'].downcase == storage_provider_type_code.downcase }
           if options['storageServer']
-            storage_service_code = options['storageServer'].to_s
+            storage_server_id = options['storageServer']
           else
+            if storage_server_type.nil?
+              raise_command_error "error: no storage server type found for amazonS3"
+            end
+            Morpheus::Logging::DarkPrinter.puts "Finding storage services..." if Morpheus::Logging.debug?
+            storage_server_options = @storage_servers_interface.list({max:1000, 'typeId': storage_server_type['id']})['storageServers'].collect {|it| {'name' => it['name'], 'value' => it['id'] } }
             v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'storageServer',
                                                            'fieldLabel' => 'Storage Server',
                                                            'type' => 'select',
-                                                           'selectOptions' => find_storage_services(12), # storage service type id 12 is amazonS3
+                                                           'selectOptions' => storage_server_options,
                                                            'required' => true,
                                                            'description' => 'Choose a connected storage service.'}], options, @api_client, {})
-            storage_service_code = v_prompt['storageServer'] unless v_prompt['storageServer'].nil?
+            storage_server_id = v_prompt['storageServer'] unless v_prompt['storageServer'].nil?
           end
-          payload['storageBucket']['storageServer'] = storage_service_code.to_s
+          payload['storageBucket']['storageServer'] = storage_server_id.to_s # api before 8.0.11 expects a string instead of a number, oooof
         end
 
         # Provider Type Specific Options
@@ -1252,7 +1259,6 @@ class Morpheus::Cli::StorageProvidersCommand
 
   def get_storage_provider_types()
     [
-      {'name' => 'S3', 'value' => 's3'},
       {'name' => 'Amazon S3', 'value' => 'amazonS3'},
       {'name' => 'Alibaba', 'value' => 'alibaba'},
       {'name' => 'Azure', 'value' => 'azure'},
@@ -1260,14 +1266,9 @@ class Morpheus::Cli::StorageProvidersCommand
       {'name' => 'Local Storage', 'value' => 'local'},
       {'name' => 'NFSv3', 'value' => 'nfs'},
       {'name' => 'Openstack Swift', 'value' => 'openstack'},
-      {'name' => 'Rackspace CDN', 'value' => 'rackspace'}
+      {'name' => 'Rackspace CDN', 'value' => 'rackspace'},
+      {'name' => 'S3', 'value' => 's3'},
     ]
-  end
-
-  def find_storage_services(id)
-    Morpheus::Logging::DarkPrinter.puts "Finding storage services..." if Morpheus::Logging.debug?
-    @storage_servers_interface.list({max:1000, 'typeId': id})['storageServers'].collect {|it| {'name' => it['name'], 'value' => it['id'] } }
-
   end
 
   def find_storage_provider_by_name_or_id(val)
