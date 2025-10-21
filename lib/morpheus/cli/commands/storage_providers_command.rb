@@ -27,6 +27,7 @@ class Morpheus::Cli::StorageProvidersCommand
   def connect(opts)
     @api_client = establish_remote_appliance_connection(opts)
     @storage_providers_interface = @api_client.storage_providers
+    @storage_servers_interface = @api_client.storage_servers
     @clouds_interface = @api_client.clouds
     @options_interface = @api_client.options
   end
@@ -215,10 +216,37 @@ class Morpheus::Cli::StorageProvidersCommand
         elsif options['providerType']
           storage_provider_type_code = options['providerType'].to_s
         else
-          v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'providerType', 'fieldLabel' => 'Provider Type', 'type' => 'select', 'selectOptions' => get_storage_provider_types(), 'required' => true, 'description' => 'Choose a storage bucket type.'}], options, @api_client, {})
+          v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'providerType',
+                                                         'fieldLabel' => 'Provider Type',
+                                                         'type' => 'select',
+                                                         'selectOptions' => get_storage_provider_types(),
+                                                         'required' => true,
+                                                         'description' => 'Choose a storage bucket type.'}],
+                                                       options, @api_client, {})
           storage_provider_type_code = v_prompt['providerType'] unless v_prompt['providerType'].nil?
         end
-        payload['storageBucket']['providerType'] = storage_provider_type_code
+        if storage_provider_type_code == 'amazonS3'
+          payload['storageBucket']['providerType'] = '12'  # cloud provided amazonS3
+        else
+          payload['storageBucket']['providerType'] = storage_provider_type_code
+        end
+
+        # Storage Service (only for amazonS3)
+        storage_service_code = nil
+        if storage_provider_type_code == 'amazonS3'
+          if options['storageServer']
+            storage_service_code = options['storageServer'].to_s
+          else
+            v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'storageServer',
+                                                           'fieldLabel' => 'Storage Server',
+                                                           'type' => 'select',
+                                                           'selectOptions' => find_storage_services(12), # storage service type id 12 is amazonS3
+                                                           'required' => true,
+                                                           'description' => 'Choose a connected storage service.'}], options, @api_client, {})
+            storage_service_code = v_prompt['storageServer'] unless v_prompt['storageServer'].nil?
+          end
+          payload['storageBucket']['storageServer'] = storage_service_code.to_s
+        end
 
         # Provider Type Specific Options
         provider_type_option_types = nil
@@ -232,6 +260,15 @@ class Morpheus::Cli::StorageProvidersCommand
             {'fieldContext' => 'config', 'fieldName' => 'region', 'fieldLabel' => 'Region', 'type' => 'text', 'required' => false, 'description' => 'Optional Amazon region if creating a new bucket.'},
             {'fieldContext' => 'config', 'fieldName' => 'endpoint', 'fieldLabel' => 'Endpoint URL', 'type' => 'text', 'required' => false, 'description' => 'Optional endpoint URL if pointing to an object store other than amazon that mimics the Amazon S3 APIs.'}
           ]
+        elsif storage_provider_type_code == 'amazonS3'
+          # print_h2 "Amazon S3 Provided by Cloud Options"
+          provider_type_option_types = [
+            {'fieldName' => 'bucketName', 'fieldLabel' => 'Bucket Name', 'type' => 'text', 'required' => true, 'description' => ''},
+            {'fieldName' => 'createBucket', 'fieldLabel' => 'Create Bucket', 'type' => 'checkbox', 'required' => false, 'defaultValue' => false, 'description' => 'Create the bucket if it does not exist.'},
+            {'fieldContext' => 'config', 'fieldName' => 'region', 'fieldLabel' => 'Region', 'type' => 'text', 'required' => false, 'description' => 'Optional Amazon region if creating a new bucket.'},
+            {'fieldContext' => 'config', 'fieldName' => 'endpoint', 'fieldLabel' => 'Endpoint URL', 'type' => 'text', 'required' => false, 'description' => 'Optional endpoint URL if pointing to an object store other than amazon that mimics the Amazon S3 APIs.'}
+          ]
+
         elsif storage_provider_type_code == 'azure'
           # print_h2 "Azure Options"
           provider_type_option_types = [
@@ -1215,7 +1252,8 @@ class Morpheus::Cli::StorageProvidersCommand
 
   def get_storage_provider_types()
     [
-      {'name' => 'Amazon S3', 'value' => 's3'},
+      {'name' => 'S3', 'value' => 's3'},
+      {'name' => 'Amazon S3', 'value' => 'amazonS3'},
       {'name' => 'Alibaba', 'value' => 'alibaba'},
       {'name' => 'Azure', 'value' => 'azure'},
       {'name' => 'CIFS', 'value' => 'cifs'},
@@ -1224,6 +1262,12 @@ class Morpheus::Cli::StorageProvidersCommand
       {'name' => 'Openstack Swift', 'value' => 'openstack'},
       {'name' => 'Rackspace CDN', 'value' => 'rackspace'}
     ]
+  end
+
+  def find_storage_services(id)
+    Morpheus::Logging::DarkPrinter.puts "Finding storage services..." if Morpheus::Logging.debug?
+    @storage_servers_interface.list({max:1000, 'typeId': id})['storageServers'].collect {|it| {'name' => it['name'], 'value' => it['id'] } }
+
   end
 
   def find_storage_provider_by_name_or_id(val)
