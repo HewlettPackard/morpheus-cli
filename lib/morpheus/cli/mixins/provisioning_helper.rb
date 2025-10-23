@@ -1117,6 +1117,10 @@ module Morpheus::Cli::ProvisioningHelper
           datastore_options << {"id" => it["value"] || it["id"], "name" => it["name"], "value" => it["value"] || it["id"]}
       end
     end
+    storage_profiles = []
+    if provision_type['storageProfiles']
+      storage_profiles = provision_type['storageProfiles'].sort {|x,y| x['displayOrder'] <=> y['displayOrder'] }.collect {|it| {'name' => it['name'], 'value' => it['code'], 'isDefault' => it['isDefault']} }
+    end
 
     #puts "Configure Root Volume"
 
@@ -1193,6 +1197,10 @@ module Morpheus::Cli::ProvisioningHelper
       v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'datastoreId', 'type' => 'select', 'fieldLabel' => 'Root Datastore', 'selectOptions' => datastore_options, 'required' => true, 'description' => 'Choose a datastore.', 'defaultValue' => default_datastore ? default_datastore['name'] : volume['datastoreId']}], options[:options])
       volume['datastoreId'] = v_prompt[field_context]['datastoreId']
     end
+    if !storage_profiles.empty?
+      v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'storageProfile', 'type' => 'select', 'fieldLabel' => 'Root Storage Profile', 'selectOptions' => storage_profiles, 'required' => false, 'description' => 'Choose a storage profile.'}], options[:options])
+      volume['storageProfile'] = v_prompt[field_context]['storageProfile'] if v_prompt[field_context] && !v_prompt[field_context]['storageProfile'].to_s.empty?
+    end
 
     volumes << volume
 
@@ -1263,7 +1271,11 @@ module Morpheus::Cli::ProvisioningHelper
           v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'datastoreId', 'type' => 'select', 'fieldLabel' => "Disk #{volume_index} Datastore", 'selectOptions' => datastore_options, 'required' => true, 'description' => 'Choose a datastore.', 'defaultValue' => volume['datastoreId']}], options[:options])
           volume['datastoreId'] = v_prompt[field_context]['datastoreId']
         end
-
+        if !storage_profiles.empty?
+          v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'storageProfile', 'type' => 'select', 'fieldLabel' => "Disk #{volume_index} Storage Profile", 'selectOptions' => storage_profiles, 'required' => false, 'description' => 'Choose a storage profile.'}], options[:options])
+          volume['storageProfile'] = v_prompt[field_context]['storageProfile'] if v_prompt[field_context] && !v_prompt[field_context]['storageProfile'].to_s.empty?
+        end
+      
         volumes << volume
 
         volume_index += 1
@@ -1347,7 +1359,10 @@ module Morpheus::Cli::ProvisioningHelper
         end
       end
     end
-
+    storage_profiles = []
+    if provision_type['storageProfiles']
+      storage_profiles = provision_type['storageProfiles'].sort {|x,y| x['displayOrder'] <=> y['displayOrder'] }.collect {|it| {'name' => it['name'], 'value' => it['code'], 'isDefault' => it['isDefault']} }
+    end
     #puts "Configure Root Volume"
 
     field_context = "rootVolume"
@@ -1385,6 +1400,9 @@ module Morpheus::Cli::ProvisioningHelper
     if !current_root_volume['controllerMountPoint'].to_s.empty?
       volume['controllerMountPoint'] = current_root_volume['controllerMountPoint']
     end
+    if !current_root_volume['storageProfile'].to_s.empty?
+      volume['storageProfile'] = current_root_volume['storageProfile']
+    end
     if plan_info['rootDiskCustomizable'] && storage_type && storage_type['customLabel']
       v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'name', 'type' => 'text', 'fieldLabel' => 'Root Volume Label', 'required' => true, 'description' => 'Enter a volume label.', 'defaultValue' => volume['name']}], options[:options])
       volume['name'] = v_prompt[field_context]['name']
@@ -1413,7 +1431,10 @@ module Morpheus::Cli::ProvisioningHelper
     #   v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'datastoreId', 'type' => 'select', 'fieldLabel' => 'Root Datastore', 'selectOptions' => datastore_options, 'required' => true, 'description' => 'Choose a datastore.'}], options[:options])
     #   volume['datastoreId'] = v_prompt[field_context]['datastoreId']
     # end
-
+    if !storage_profiles.empty?
+      v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'storageProfile', 'type' => 'select', 'fieldLabel' => 'Root Storage Profile', 'selectOptions' => storage_profiles, 'required' => false, 'description' => 'Choose a storage profile.', 'defaultValue' => volume['storageProfile']}], options[:options])
+      volume['storageProfile'] = v_prompt[field_context]['storageProfile'] if v_prompt[field_context] && !v_prompt[field_context]['storageProfile'].to_s.empty?
+    end
     volumes << volume
 
     # modify or delete existing data volumes
@@ -1443,6 +1464,9 @@ module Morpheus::Cli::ProvisioningHelper
           if !current_volume['controllerMountPoint'].to_s.empty?
             volume['controllerMountPoint'] = current_volume['controllerMountPoint']
           end
+          if !current_volume['storageProfile'].to_s.empty?
+            volume['storageProfile'] = current_volume['storageProfile']
+          end
           volumes << volume
         else
           # v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'storageType', 'type' => 'select', 'fieldLabel' => "Disk #{volume_index} Storage Type", 'selectOptions' => storage_types, 'required' => true, 'skipSingleOption' => true, 'description' => 'Choose a storage type.'}], options[:options])
@@ -1471,7 +1495,9 @@ module Morpheus::Cli::ProvisioningHelper
           if !current_volume['controllerMountPoint'].to_s.empty?
             volume['controllerMountPoint'] = current_volume['controllerMountPoint']
           end
-          
+          if !current_volume['storageProfile'].to_s.empty?
+            volume['storageProfile'] = current_volume['storageProfile']
+          end
           if plan_info['customizeVolume'] && storage_type['customLabel']
             v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'name', 'type' => 'text', 'fieldLabel' => "Disk #{volume_index} Volume Label", 'required' => true, 'description' => 'Enter a volume label.', 'defaultValue' => volume['name']}], options[:options])
             volume['name'] = v_prompt[field_context]['name']
@@ -1499,6 +1525,10 @@ module Morpheus::Cli::ProvisioningHelper
           #   v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'datastoreId', 'type' => 'select', 'fieldLabel' => "Disk #{volume_index} Datastore", 'selectOptions' => datastore_options, 'required' => true, 'description' => 'Choose a datastore.'}], options[:options])
           #   volume['datastoreId'] = v_prompt[field_context]['datastoreId']
           # end
+          if !storage_profiles.empty?
+            v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'storageProfile', 'type' => 'select', 'fieldLabel' => 'Root Storage Profile', 'selectOptions' => storage_profiles, 'required' => false, 'description' => 'Choose a storage profile.', 'defaultValue' => current_volume['storageProfile']}], options[:options])
+            volume['storageProfile'] = v_prompt[field_context]['storageProfile'] if v_prompt[field_context] && !v_prompt[field_context]['storageProfile'].to_s.empty?
+          end
 
           volumes << volume
 
@@ -1571,6 +1601,10 @@ module Morpheus::Cli::ProvisioningHelper
         if !datastore_options.empty?
           v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'datastoreId', 'type' => 'select', 'fieldLabel' => "Disk #{volume_index} Datastore", 'selectOptions' => datastore_options, 'required' => true, 'description' => 'Choose a datastore.', 'defaultValue' => current_root_volume['datastoreId']}], options[:options])
           volume['datastoreId'] = v_prompt[field_context]['datastoreId'] unless v_prompt[field_context]['datastoreId'].to_s.empty?
+        end
+        if !storage_profiles.empty?
+          v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'storageProfile', 'type' => 'select', 'fieldLabel' => 'Root Storage Profile', 'selectOptions' => storage_profiles, 'required' => false, 'description' => 'Choose a storage profile.'}], options[:options])
+          volume['storageProfile'] = v_prompt[field_context]['storageProfile'] if v_prompt[field_context] && !v_prompt[field_context]['storageProfile'].to_s.empty?
         end
 
         volumes << volume
