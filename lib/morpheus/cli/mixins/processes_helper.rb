@@ -147,4 +147,140 @@ module Morpheus::Cli::ProcessesHelper
     return process
   end
 
+  def handle_history_command(args, arg_name, label, ref_type, &block)
+    raw_args = args.dup
+    options = {}
+    #options[:show_output] = true
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = "Usage: #{prog_name} #{command_name} history [#{arg_name}]"
+      opts.on( nil, '--events', "Display sub processes (events)." ) do
+        options[:show_events] = true
+      end
+      opts.on( nil, '--output', "Display process output." ) do
+        options[:show_output] = true
+      end
+      opts.on('--details', "Display more details: memory and storage usage used / max values." ) do
+        options[:show_events] = true
+        options[:show_output] = true
+        options[:details] = true
+      end
+      # opts.on('--process-id ID', String, "Display details about a specfic process only." ) do |val|
+      #   options[:process_id] = val
+      # end
+      # opts.on('--event-id ID', String, "Display details about a specfic process event only." ) do |val|
+      #   options[:event_id] = val
+      # end
+      build_standard_list_options(opts, options)
+      opts.footer = "List historical processes for a specific #{label}.\n" + 
+                    "[#{arg_name}] is required. This is the name or id of an #{label}."
+    end
+    optparse.parse!(args)
+
+    # shortcut to other actions
+    # if options[:process_id]
+    #   return history_details(raw_args)
+    # elsif options[:event_id]
+    #   return history_event_details(raw_args)
+    # end
+
+    verify_args!(args:args, optparse:optparse, count:1)
+    connect(options)
+    
+    record = block.call(args[0])
+    # block should raise_command_error if not found
+    if record.nil?
+      raise_command_error "#{label} not found for name or id '#{args[0]}'"
+    end
+    params = {}
+    params.merge!(parse_list_options(options))
+    # params['query'] = params.delete('phrase') if params['phrase']
+    params['refType'] = ref_type
+    params['refId'] = record['id']
+    @processes_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @processes_interface.dry.list(params)
+      return
+    end
+    json_response = @processes_interface.list(params)
+    render_response(json_response, options, "processes") do
+      title = "#{label} History: #{record['name'] || record['id']}"
+      subtitles = parse_list_subtitles(options)
+      print_h1 title, subtitles, options
+      processes = json_response['processes']
+      if processes.empty?
+        print "#{cyan}No process history found.#{reset}\n\n"
+      else
+        history_records = []
+        processes.each do |process|
+          row = {
+            id: process['id'],
+            eventId: nil,
+            uniqueId: process['uniqueId'],
+            name: process['displayName'],
+            description: process['description'],
+            processType: process['processType'] ? (process['processType']['name'] || process['processType']['code']) : process['processTypeName'],
+            createdBy: process['createdBy'] ? (process['createdBy']['displayName'] || process['createdBy']['username']) : '',
+            startDate: format_local_dt(process['startDate']),
+            duration: format_process_duration(process),
+            status: format_process_status(process),
+            error: format_process_error(process, options[:details] ? nil : 20),
+            output: format_process_output(process, options[:details] ? nil : 20)
+          }
+          history_records << row
+          process_events = process['events'] || process['processEvents']
+          if options[:show_events]
+            if process_events
+              process_events.each do |process_event|
+                event_row = {
+                  id: process['id'],
+                  eventId: process_event['id'],
+                  uniqueId: process_event['uniqueId'],
+                  name: process_event['displayName'], # blank like the UI
+                  description: process_event['description'],
+                  processType: process_event['processType'] ? (process_event['processType']['name'] || process_event['processType']['code']) : process['processTypeName'],
+                  createdBy: process_event['createdBy'] ? (process_event['createdBy']['displayName'] || process_event['createdBy']['username']) : '',
+                  startDate: format_local_dt(process_event['startDate']),
+                  duration: format_process_duration(process_event),
+                  status: format_process_status(process_event),
+                  error: format_process_error(process_event, options[:details] ? nil : 20),
+                  output: format_process_output(process_event, options[:details] ? nil : 20)
+                }
+                history_records << event_row
+              end
+            else
+              
+            end
+          end
+        end
+        columns = [
+          {:id => {:display_name => "PROCESS ID"} },
+          :name, 
+          :description, 
+          {:processType => {:display_name => "PROCESS TYPE"} },
+          {:createdBy => {:display_name => "CREATED BY"} },
+          {:startDate => {:display_name => "START DATE"} },
+          {:duration => {:display_name => "ETA/DURATION"} },
+          :status, 
+          :error
+        ]
+        if options[:show_events]
+          columns.insert(1, {:eventId => {:display_name => "EVENT ID"} })
+        end
+        if options[:show_output]
+          columns << :output
+        end
+        # custom pretty table columns ...
+        if options[:include_fields]
+          columns = options[:include_fields]
+        end
+        print cyan
+        print as_pretty_table(history_records, columns, options)
+        #print_results_pagination(json_response)
+        print_results_pagination(json_response, {:label => "process", :n_label => "processes"})
+        print reset, "\n"
+      end
+    end
+    return 0, nil
+  end
+
 end
