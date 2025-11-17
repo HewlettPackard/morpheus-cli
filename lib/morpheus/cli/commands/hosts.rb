@@ -2556,7 +2556,7 @@ EOT
       # prompt 
       # Host (preferredParentServer.id)
       if payload['server']['host']
-        options[:options] = payload['server'].remove('host')
+        options[:options] = payload['server'].delete('host')
       end
       default_host = (server['preferredParentServer'] ? server['preferredParentServer']['id'] : (server['parentServer'] ? server['parentServer']['id'] : nil))
       host = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'host', 'type' => 'select', 'fieldLabel' => 'Host', 'optionSource' => 'parentServers', 'required' => false, 'description' => 'Choose the preferred parent host for this virtual machine to be placed on.', 'defaultValue' => default_host}],options[:options],@api_client,{'serverId' => server['id']})['host']
