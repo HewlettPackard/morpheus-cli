@@ -75,6 +75,9 @@ class Morpheus::Cli::Hosts
         # params[:clusterId] = val
         options[:cluster] = val
       end
+      opts.on( '--parent HOST', "Parent Host / Hypervisor Name or ID" ) do |val|
+        options[:parent_server_id] = val
+      end
       opts.on( '--plan NAME', String, "Filter by Plan name(s)" ) do |val|
         # commas used in names a lot so use --plan one --plan two
         params['plan'] ||= []
@@ -188,6 +191,13 @@ class Morpheus::Cli::Hosts
         params['clusterId'] = cluster['id']
       end
     end
+    parent_hosts = nil
+    if options[:parent_server_id]
+      parent_hosts = parse_id_list(options[:parent_server_id]).collect do |parent_server_id|
+        find_host_by_name_or_id(parent_server_id)
+      end
+      params['parentServerId'] = parent_hosts.collect {|it| it['id'] }
+    end
     params['labels'] = options[:labels] if options[:labels]
     if options[:tags] && !options[:tags].empty?
       options[:tags].each do |k,v|
@@ -232,6 +242,9 @@ class Morpheus::Cli::Hosts
         subtitles << "Cluster: #{cluster['name']}".strip
       elsif params['clusterId']
         subtitles << "Cluster: #{params['clusterId']}".strip
+      end
+      if parent_hosts
+        subtitles << "Parent Host: #{parent_hosts.collect {|it| it['name'] }.join(", ")}".strip
       end
       subtitles += parse_list_subtitles(options)
       print_h1 title, subtitles, options
@@ -379,6 +392,13 @@ class Morpheus::Cli::Hosts
       opts.on( '-i', '--ip IPADDRESS', "Filter by IP Address" ) do |val|
         params[:ip] = val
       end
+      opts.on( '--cluster CLUSTER', '--cluster CLUSTER', "Filter by Cluster Name or ID" ) do |val|
+        # params[:clusterId] = val
+        options[:cluster] = val
+      end
+      opts.on( '--parent HOST', "Parent Host / Hypervisor Name or ID" ) do |val|
+        options[:parent_server_id] = val
+      end
       opts.on('--vm', "Show only virtual machines" ) do
         params[:vm] = true
       end
@@ -402,9 +422,6 @@ class Morpheus::Cli::Hosts
       end
       opts.on( '--created-by USER', "Created By User Username or ID" ) do |val|
         options[:created_by] = val
-      end
-      opts.on('--details', "Display more details: memory and storage usage used / max values." ) do
-        options[:details] = true
       end
       opts.on( '-s', '--search PHRASE', "Search Phrase" ) do |phrase|
         options[:phrase] = phrase
@@ -442,6 +459,23 @@ class Morpheus::Cli::Hosts
         return if created_by_ids.nil?
         params['createdBy'] = created_by_ids
         # params['ownerId'] = created_by_ids # 4.2.1+
+      end
+      cluster = nil
+      if options[:cluster]
+        if options[:cluster].to_s =~ /\A\d{1,}\Z/
+          params['clusterId'] = options[:cluster]
+        else
+          cluster = find_cluster_by_name_or_id(options[:cluster])
+          return 1 if cluster.nil?
+          params['clusterId'] = cluster['id']
+        end
+      end
+      parent_hosts = nil
+      if options[:parent_server_id]
+        parent_hosts = parse_id_list(options[:parent_server_id]).collect do |parent_server_id|
+          find_host_by_name_or_id(parent_server_id)
+        end
+        params['parentServerId'] = parent_hosts.collect {|it| it['id'] }
       end
       @servers_interface.setopts(options)
       if options[:dry_run]

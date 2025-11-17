@@ -83,6 +83,9 @@ class Morpheus::Cli::Instances
       opts.on( '-H', '--host HOST', "Host Name or ID" ) do |val|
         options[:host] = val
       end
+      opts.on( '--parent HOST', "Parent Host / Hypervisor Name or ID" ) do |val|
+        options[:parent_server_id] = val
+      end
       opts.on( '--owner USER', "Owner Username or ID" ) do |val|
         options[:owner] = val
       end
@@ -175,6 +178,14 @@ class Morpheus::Cli::Instances
       params['serverId'] = host['id']
     end
 
+    parent_hosts = nil
+    if options[:parent_server_id]
+      parent_hosts = parse_id_list(options[:parent_server_id]).collect do |parent_server_id|
+        find_host_by_name_or_id(parent_server_id)
+      end
+      params['parentServerId'] = parent_hosts.collect {|it| it['id'] }
+    end
+
     account = nil
     #todo: user = find_available_user_option(owner_id)
 
@@ -223,6 +234,9 @@ class Morpheus::Cli::Instances
       end
       if host
         subtitles << "Host: #{host['name']}".strip
+      end
+      if parent_hosts
+        subtitles << "Parent Host: #{parent_hosts.collect {|it| it['name'] }.join(", ")}".strip
       end
       if options[:owner]
         subtitles << "Created By: #{options[:owner]}"
@@ -315,6 +329,9 @@ class Morpheus::Cli::Instances
       opts.on( '-H', '--host HOST', "Host Name or ID" ) do |val|
         options[:host] = val
       end
+      opts.on( '--parent HOST', "Parent Host (Hypervisor) Name or ID" ) do |val|
+        options[:parent_server_id] = val
+      end
       opts.on( '--owner USER', "Owner Username or ID" ) do |val|
         options[:owner] = val
       end
@@ -348,6 +365,14 @@ class Morpheus::Cli::Instances
       host = options[:host] ? find_host_by_name_or_id(options[:host]) : options[:host]
       if host
         params['serverId'] = host['id']
+      end
+
+      parent_hosts = nil
+      if options[:parent_server_id]
+        parent_hosts = parse_id_list(options[:parent_server_id]).collect do |parent_server_id|
+          find_host_by_name_or_id(parent_server_id)
+        end
+        params['parentServerId'] = parent_hosts.collect {|it| it['id'] }
       end
 
       account = nil
