@@ -102,7 +102,7 @@ class Morpheus::Cli::Shell
       command_list = @auto_complete_commands
       result = command_list.grep(/^#{Regexp.escape(s)}/)
       if result.nil? || result.empty?
-        Readline::FILENAME_COMPLETION_PROC.call(s)
+        Readline::FILENAME_COMPLETION_PROC.call(s) rescue []
       else
         result
       end
