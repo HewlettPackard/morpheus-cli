@@ -116,6 +116,7 @@ module Morpheus
                 # username = $stdin.gets.chomp!
                 Readline.completion_append_character = ""
                 Readline.basic_word_break_characters = ''
+                Readline.completer_word_break_characters = '' rescue nil
                 Readline.completion_proc = nil
                 username = Readline.readline("Username: #{required_blue_prompt} ", false).to_s.chomp
               else
@@ -133,6 +134,7 @@ module Morpheus
 
                   Readline.completion_append_character = ""
                   Readline.basic_word_break_characters = ''
+                  Readline.completer_word_break_characters = '' rescue nil
                   Readline.completion_proc = nil
                   # needs to work like $stdin.noecho
                   Readline.pre_input_hook = lambda {

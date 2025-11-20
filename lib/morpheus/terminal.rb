@@ -356,30 +356,6 @@ module Morpheus
       @angry_prompt ||= Morpheus::Terminal.angry_prompt
     end
 
-    # def gets
-    #   Readline.completion_append_character = " "
-    #   Readline.completion_proc = @auto_complete
-    #   Readline.basic_word_break_characters = ""
-    #   #Readline.basic_word_break_characters = "\t\n\"\‘`@$><=;|&{( "
-    #   input = Readline.readline("#{@prompt}", true).to_s
-    #   input = input.strip
-    #   execute(input)
-    # end
-
-    # def puts(*cmds)
-    #   cmds.each do |cmd|
-    #     self.execute(cmd) # exec
-    #   end
-    # end
-
-    # def gets(*args)
-    #   $stdin.gets(*args)
-    # end
-
-    def readline(*args)
-      # todo: one prompt to rule them all
-    end
-
 # protected
 
     def execute(input)

@@ -99,13 +99,15 @@ class Morpheus::Cli::Shell
     end
     @auto_complete_commands = (@exploded_commands + @shell_commands + @alias_commands).collect {|it| it.to_s }
     @auto_complete = proc do |s|
-      command_list = @auto_complete_commands
-      result = command_list.grep(/^#{Regexp.escape(s)}/)
-      if result.nil? || result.empty?
-        Readline::FILENAME_COMPLETION_PROC.call(s) rescue []
+      results = @auto_complete_commands.grep(/^#{Regexp.escape(s)}/)
+      # do not append space unless there is only one match
+      # note: this does not work in newer rubies for some reason (>= 3.3.7)
+      if results.size == 1
+        Readline.completion_append_character = " "
       else
-        result
+        Readline.completion_append_character = ""
       end
+      results
     end
   end
 
@@ -284,9 +286,10 @@ class Morpheus::Cli::Shell
       while !@exit_now_please do
         #Readline.input = my_terminal.stdin
         #Readline.input = $stdin
-        Readline.completion_append_character = " "
+        Readline.completion_append_character = ""
         Readline.completion_proc = @auto_complete
-        Readline.basic_word_break_characters = ""
+        Readline.basic_word_break_characters = "" rescue nil
+        Readline.completer_word_break_characters = "" rescue nil
         #Readline.basic_word_break_characters = "\t\n\"\‘`@$><=;|&{( "
         input = Readline.readline(@calculated_prompt, true).to_s
         input = input.strip
