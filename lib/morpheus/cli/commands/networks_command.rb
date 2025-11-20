@@ -791,7 +791,7 @@ class Morpheus::Cli::NetworksCommand
         end
 
         # Allow IP Override
-        if network_type['staticOverrideEditable'] && payload['network']['allowStaticOverride'].nil?
+        if payload['network']['allowStaticOverride'].nil?
           if options['allowStaticOverride'] != nil
             payload['network']['allowStaticOverride'] = options['allowStaticOverride']
           else
