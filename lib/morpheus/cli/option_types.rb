@@ -24,6 +24,7 @@ module Morpheus
           # should use Readline.readline to probably
           Readline.completion_append_character = ""
           Readline.basic_word_break_characters = ''
+          Readline.completer_word_break_characters = '' rescue nil
           Readline.completion_proc = nil
           if default_value.nil?
             confirm_prompt = "#{message} (yes/no): "
@@ -805,6 +806,7 @@ module Morpheus
           #Readline.input = $stdin
           Readline.completion_append_character = ""
           Readline.basic_word_break_characters = ''
+          Readline.completer_word_break_characters = '' rescue nil
           Readline.completion_proc = proc {|s| 
             matches = []
             available_options = (select_options || [])
@@ -902,6 +904,7 @@ module Morpheus
             #Readline.input = $stdin
             Readline.completion_append_character = ""
             Readline.basic_word_break_characters = ''
+            Readline.completer_word_break_characters = '' rescue nil
             Readline.completion_proc = proc {|s| 
               matches = []
               available_options = (select_options || [])
@@ -1121,6 +1124,7 @@ module Morpheus
           # input = $stdin.gets.chomp!
           Readline.completion_append_character = ""
           Readline.basic_word_break_characters = ''
+          Readline.completer_word_break_characters = '' rescue nil
           Readline.completion_proc = nil
           prompt_label = "#{option_type['fieldLabel']}#{option_type['fieldAddOn'] ? (' (' + option_type['fieldAddOn'] + ') ') : '' }#{!option_type['required'] ? ' (optional)' : ''}#{!option_type['defaultValue'].to_s.empty? ? ' ['+option_type['defaultValue'].to_s+']' : ''}: "
           input = Readline.readline(prompt_label, false).to_s
@@ -1187,6 +1191,7 @@ module Morpheus
           else
             Readline.completion_append_character = ""
             Readline.basic_word_break_characters = ''
+            Readline.completer_word_break_characters = '' rescue nil
             Readline.completion_proc = nil
             # needs to work like $stdin.noecho
             Readline.pre_input_hook = lambda {
@@ -1222,6 +1227,7 @@ module Morpheus
           #Readline.input = $stdin
           Readline.completion_append_character = ""
           Readline.basic_word_break_characters = ''
+          Readline.completer_word_break_characters = '' rescue nil
           Readline.completion_proc = proc {|s| 
             # FILENAME_COMPLETION_PROC is nil in newer rubies
             Readline::FILENAME_COMPLETION_PROC.call(s) rescue []
