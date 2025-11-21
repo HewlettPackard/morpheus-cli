@@ -3454,7 +3454,7 @@ class Morpheus::Cli::Clusters
         # end
 
         # perms
-        perms = prompt_permissions(options.merge({:for_affinity_group => true}), ['groupDefaults'])
+        perms = prompt_permissions(options.merge({:for_affinity_group => true}), ['plans','groupDefaults'])
 
         affinity_group['resourcePermissions'] = perms['resourcePermissions'] unless perms['resourcePermissions'].nil?
         affinity_group['tenants'] = perms['tenantPermissions'] unless perms['tenantPermissions'].nil?
