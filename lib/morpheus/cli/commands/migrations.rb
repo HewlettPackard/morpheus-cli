@@ -8,7 +8,7 @@ class Morpheus::Cli::Migrations
 
   set_command_name :'migrations'
   set_command_description "View and manage migrations."
-  register_subcommands :list, :get, :add, :update, :remove, :history
+  register_subcommands :list, :get, :add, :update, :run, :remove, :history
 
   # RestCommand settings
   register_interfaces :migrations, :processes
@@ -59,7 +59,7 @@ class Morpheus::Cli::Migrations
           # {"ID" => lambda {|it| it['sourceServer'] ? it['sourceServer']['id'] : "" } },
           # {"Name" => lambda {|it| it['sourceServer'] ? it['sourceServer']['name'] : "" } },
           {"Source" => lambda {|it| it['sourceServer'] ? "#{it['sourceServer']['name']} [#{it['sourceServer']['id']}]" : "" } },
-          {"Destination" => lambda {|it| it['destinationServer'] ? "#{it['destinationServer']['name']} [#{it['sourceServer']['id']}]" : "" } },
+          {"Destination" => lambda {|it| it['destinationServer'] ? "#{it['destinationServer']['name']} [#{it['destinationServer']['id']}]" : "" } },
           {"Status" => lambda {|it| format_migration_server_status(it) } }
         ]
         print as_pretty_table(servers, columns, options)
@@ -322,6 +322,36 @@ EOT
       return _get(migration["id"], {}, options)
     end
     return 0, nil
+  end
+
+  def run(args)
+    options = {}
+    params = {}
+    payload = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[migration]")
+      build_standard_post_options(opts, options, [:auto_confirm])
+      opts.footer = <<-EOT
+Runs a migration plan to transition it from pending to scheduled for execution.
+[migration] is required. This is the name or id of a migration.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:1)
+    connect(options)
+    migration = find_migration_by_name_or_id(args[0])
+    return 1 if migration.nil?
+    parse_payload(options) do |payload|
+    end
+    servers = migration['servers']
+    print cyan, "The following #{servers.size == 1 ? 'server' : servers.size.to_s + ' servers'} will be migrated:", "\n"
+    puts ""
+    print as_pretty_table(servers, {"Virtual Machine" => lambda {|it| it['sourceServer'] ? "#{it['sourceServer']['name']} [#{it['sourceServer']['id']}]" : "" } }, options)
+    puts ""
+    confirm!("Are you sure you want to execute the migration plan?", options)
+    execute_api(@migrations_interface, :run, [migration['id']], options, 'migration') do |json_response|
+      print_green_success "Running migration #{migration['name']}"
+    end
   end
 
   protected

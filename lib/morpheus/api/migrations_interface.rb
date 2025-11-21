@@ -42,4 +42,8 @@ class Morpheus::MigrationsInterface < Morpheus::RestInterface
   #   execute(method: :get, url: "#{base_path}/target-groups", params: params, headers: headers)
   # end
 
+  def run(id, payload={}, params={}, headers={})
+    execute(method: :post, url: "#{base_path}/#{CGI::escape(id.to_s)}/run", params: params, payload: payload, headers: headers)
+  end
+
 end
