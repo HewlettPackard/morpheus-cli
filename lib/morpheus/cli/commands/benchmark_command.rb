@@ -353,10 +353,9 @@ EOT
         out << "#{benchmark_name.ljust(30, ' ')}"
         # exit: 0
         exit_code = benchmark_record.exit_code
-        bad_benchmark = benchmark_record.exit_code && benchmark_record.exit_code != 0
-        if bad_benchmark
-          out << "\texit: #{bad_benchmark.exit_code.to_s.ljust(2, ' ')}"
-          out << "\terror: #{bad_benchmark.error.to_s.ljust(12, ' ')}"
+        if benchmark_record.exit_code && benchmark_record.exit_code != 0
+          out << "\texit: #{benchmark_record.exit_code.to_s.ljust(2, ' ')}"
+          out << "\terror: #{benchmark_record.error.to_s.ljust(12, ' ')}"
         else
           out << "\texit: 0 "
         end
