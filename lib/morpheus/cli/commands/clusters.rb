@@ -3410,12 +3410,7 @@ class Morpheus::Cli::Clusters
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage( "[cluster] [name] [options]")
       build_option_type_options(opts, options, add_affinity_group_option_types)
-      # opts.on('--refresh [SECONDS]', String, "Refresh until execution is complete. Default interval is #{default_refresh_interval} seconds.") do |val|
-      #   options[:refresh_interval] = val.to_s.empty? ? default_refresh_interval : val.to_f
-      # end
-      # opts.on(nil, '--no-refresh', "Do not refresh" ) do
-      #   options[:no_refresh] = true
-      # end
+      add_perms_options(opts, options, ['plans'])
       build_standard_add_options(opts, options)
       opts.footer = "Add affinity group to a cluster.\n" +
         "[cluster] is required. This is the name or id of an existing cluster.\n" +
@@ -3454,10 +3449,10 @@ class Morpheus::Cli::Clusters
         # end
 
         # perms
-        perms = prompt_permissions(options.merge({:for_affinity_group => true}), ['plans','groupDefaults'])
+        perms = prompt_permissions(options, is_master_account ? ['plans'] : ['plans', 'visibility', 'tenants'])
 
         affinity_group['resourcePermissions'] = perms['resourcePermissions'] unless perms['resourcePermissions'].nil?
-        affinity_group['tenants'] = perms['tenantPermissions'] unless perms['tenantPermissions'].nil?
+        affinity_group['tenants'] = perms['tenantPermissions'] unless perms['tenantPermissions'].nil? || perms['tenantPermissions']['accounts'].empty?
         affinity_group['visibility'] = perms['resourcePool']['visibility'] if !perms['resourcePool'].nil? && !perms['resourcePool']['visibility'].nil?
 
         payload = {'affinityGroup' => affinity_group}
@@ -3497,10 +3492,8 @@ class Morpheus::Cli::Clusters
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage( "[cluster] [affinity group] [options]")
-      opts.on('--active [on|off]', String, "Enable affinity group") do |val|
-        options[:active] = val.to_s == 'on' || val.to_s == 'true' || val.to_s == ''
-      end
-      # add_perms_options(opts, options, ['groupDefaults'])
+      build_option_type_options(opts, options, update_affinity_group_option_types)
+      add_perms_options(opts, options, ['plans'])
       build_standard_update_options(opts, options)
       opts.footer = "Update a cluster affinity group.\n" +
           "[cluster] is required. This is the name or id of an existing cluster.\n" +
@@ -3530,21 +3523,27 @@ class Morpheus::Cli::Clusters
         end
       else
         payload = {'affinityGroup' => {}}
-        payload['affinityGroup']['active'] = options[:active].nil? ? (Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox', 'description' => 'Active', 'defaultValue' => true}], options[:options], @api_client))['active'] == 'on' : options[:active]
-
-        perms = prompt_permissions(options.merge({:available_plans => namespace_service_plans}), affinity_group['owner']['id'] == current_user['accountId'] ? ['plans', 'groupDefaults'] : ['plans', 'groupDefaults', 'visibility', 'tenants'])
+        options[:params] ||= {}
+        options[:params].merge!({:serverGroupId => cluster['id']})
+        option_types = update_affinity_group_option_types
+        v_prompt = Morpheus::Cli::OptionTypes.no_prompt(option_types, options[:options], @api_client, options[:params])
+        v_prompt.deep_compact!.booleanize!
+        payload.deep_merge!({'affinityGroup' => v_prompt})
+        
+        perms = prompt_permissions(options.merge({:no_prompt => true}), is_master_account ? ['plans'] : ['plans', 'visibility', 'tenants'])
+        
         perms_payload = {}
-        perms_payload['resourcePermissions'] = perms['resourcePermissions'] if !perms['resourcePermissions'].nil?
-        perms_payload['tenantPermissions'] = perms['tenantPermissions'] if !perms['tenantPermissions'].nil?
-
-        payload['affinityGroup']['permissions'] = perms_payload
+        perms_payload['resourcePermissions'] = perms['resourcePermissions'] if !perms['resourcePermissions'].nil? && !perms['resourcePermissions'].empty?
+        perms_payload['tenantPermissions'] = perms['tenantPermissions'] if !perms['tenantPermissions'].nil? && !perms['tenantPermissions']['accounts'].empty?
+        
+        payload['affinityGroup']['permissions'] = perms_payload if !perms_payload.empty?
         payload['affinityGroup']['visibility'] = perms['resourcePool']['visibility'] if !perms['resourcePool'].nil? && !perms['resourcePool']['visibility'].nil?
 
         # support -O OPTION switch on top of everything
         if options[:options]
-          payload.deep_merge!({'affinityGroup' => options[:options].reject {|k,v| k.is_a?(Symbol) }})
+          payload.deep_merge!({'affinityGroup' => options[:options].reject {|k,v| k.is_a?(Symbol) || payload['affinityGroup'].key?(k) }})
         end
-
+        
         if payload['affinityGroup'].nil? || payload['affinityGroup'].empty?
           raise_command_error "Specify at least one option to update.\n#{optparse}"
         end
@@ -5269,6 +5268,13 @@ class Morpheus::Cli::Clusters
       {'fieldName' => 'affinityType', 'fieldLabel' => 'Type', 'type' => 'select', 'selectOptions' => [{'name' => 'Keep Separate', 'value' => 'KEEP_SEPARATE'}, {'name' => 'Keep Together', 'value' => 'KEEP_TOGETHER'}], 'description' => 'Choose affinity type.', 'required' => true, 'defaultValue' => 'KEEP_SEPARATE'},
       {'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox', 'defaultValue' => true},
       # {'fieldName' => 'pool.id', 'fieldLabel' => 'Cluster', 'type' => 'select', 'optionSourceType' => 'vmware', 'optionSource' => 'vmwareZonePoolClusters', 'description' => 'Select cluster for the affinity group.', 'required' => true},
+      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiSelect', 'optionSource' => 'searchServers', 'description' => 'Select servers to be in the affinity group.'},
+    ]
+  end
+
+  def update_affinity_group_option_types
+    [
+      {'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox'},
       {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiSelect', 'optionSource' => 'searchServers', 'description' => 'Select servers to be in the affinity group.'},
     ]
   end
