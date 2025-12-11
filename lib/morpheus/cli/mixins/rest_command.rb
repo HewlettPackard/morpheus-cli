@@ -555,7 +555,7 @@ EOT
   end
 
   def _get(id, params, options)
-    if id !~ /\A\d{1,}\Z/ && rest_has_name
+    if id.to_s !~ /\A\d{1,}\Z/ && rest_has_name
       record = rest_find_by_name_or_id(id)
       if record.nil?
         return 1, "#{rest_label} not found for '#{id}'"
@@ -952,7 +952,7 @@ EOT
   end
 
   def _get_type(id, params, options)
-    if id !~ /\A\d{1,}\Z/ # && rest_type_has_name
+    if id.to_s !~ /\A\d{1,}\Z/ # && rest_type_has_name
       record = rest_type_find_by_name_or_id(id)
       if record.nil?
         return 1, "#{rest_type_label} not found for '#{id}'"

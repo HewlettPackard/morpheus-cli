@@ -127,7 +127,8 @@ module Morpheus::Routes
         buckets: {},
       },
       :'image-builder' => {},
-      :vdi => {}
+      :migrations => {},
+      :vdi => {},
     },
     admin: {
       accounts: {}, # Tenants
