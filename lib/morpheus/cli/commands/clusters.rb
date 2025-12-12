@@ -499,7 +499,7 @@ class Morpheus::Cli::Clusters
 
         # Group / Site
         group = load_group(cluster_type['code'], options)
-        cluster_payload['group'] = {'id' => group['id']}
+        cluster_payload['group'] = {'id' => group['id']} if group
 
         # Cluster Name
         if args.empty? && options[:no_prompt]
@@ -561,19 +561,19 @@ class Morpheus::Cli::Clusters
 
         # Cloud / Zone
         cloud_id = nil
-        cloud = options[:cloud] ? find_cloud_by_name_or_id_for_provisioning(group['id'], options[:cloud]) : nil
+        cloud = options[:cloud] ? find_cloud_by_name_or_id_for_provisioning(group ? group['id'] : nil, options[:cloud]) : nil
         if cloud
           # load full cloud
           cloud = @clouds_interface.get(cloud['id'])['zone']
           cloud_id = cloud['id']
         else
-          available_clouds = get_available_clouds(group['id'], {groupType: cluster_payload['type']})
+          available_clouds = get_available_clouds(group ? group['id'] : nil, {groupType: cluster_payload['type']})
 
           if available_clouds.empty?
-            print_red_alert "Group #{group['name']} has no available clouds"
+            print_red_alert group ? "Group #{group['name']} has no available clouds" : "No available clouds"
             exit 1
           else
-            cloud_id = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'cloud', 'type' => 'select', 'fieldLabel' => 'Cloud', 'selectOptions' => available_clouds, 'required' => true, 'description' => 'Select Cloud.'}],options[:options],@api_client,{groupId: group['id']})['cloud']
+            cloud_id = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'cloud', 'type' => 'select', 'fieldLabel' => 'Cloud', 'selectOptions' => available_clouds, 'required' => true, 'description' => 'Select Cloud.'}],options[:options],@api_client,{groupId: group ? group['id'] : nil})['cloud']
           end
           cloud = @clouds_interface.get(cloud_id)['zone']
         end
@@ -598,7 +598,7 @@ class Morpheus::Cli::Clusters
         # Provision Type
         provision_type = (layout && layout['provisionType'] ? layout['provisionType'] : nil) || get_provision_type_for_zone_type(cloud['zoneType']['id'])
         provision_type = @provision_types_interface.get(provision_type['id'])['provisionType'] if !provision_type.nil?
-        api_params = {zoneId: cloud['id'], siteId: group['id'], layoutId: layout['id'], groupTypeId: cluster_type['id'], provisionType: provision_type['code'], provisionTypeId: provision_type['id']}
+        api_params = {zoneId: cloud['id'], siteId: group ? group['id'] : nil, layoutId: layout['id'], groupTypeId: cluster_type['id'], provisionType: provision_type['code'], provisionTypeId: provision_type['id']}.compact
 
         # Service Plan
         service_plan = prompt_service_plan(api_params, options)
@@ -1344,7 +1344,7 @@ class Morpheus::Cli::Clusters
         server_payload['labels'] = labels if labels
 
         # Cloud
-        available_clouds = options_interface.options_for_source('clouds', {groupId: cluster['site']['id'], clusterId: cluster['id'], ownerOnly: true})['data']
+        available_clouds = options_interface.options_for_source('clouds', {groupId: cluster['site'] ? cluster['site']['id'] : nil, clusterId: cluster['id'], ownerOnly: true}.compact)['data']
         cloud_id = nil
 
         if options[:cloud]
@@ -1366,12 +1366,12 @@ class Morpheus::Cli::Clusters
         # resources (zone pools)
         cloud = @clouds_interface.get(cloud_id)['zone']
         cloud['zoneType'] = get_cloud_type(cloud['zoneType']['id'])
-        group = @groups_interface.get(cluster['site']['id'])['group']
+        group = cluster['site'] ? @groups_interface.get(cluster['site']['id'])['group'] : nil
         provision_type = server_type['provisionType'] || {}
         provision_type = @provision_types_interface.get(provision_type['id'])['provisionType'] if !provision_type.nil?
         
         server_payload['cloud'] = {'id' => cloud_id}
-        service_plan = prompt_service_plan({zoneId: cloud_id, siteId: cluster['site']['id'], provisionTypeId: server_type['provisionType']['id'], groupTypeId: cluster_type['id'], }, options)
+        service_plan = prompt_service_plan({zoneId: cloud_id, siteId: group ? group['id'] : nil, provisionTypeId: server_type['provisionType']['id'], groupTypeId: cluster_type['id']}.compact, options)
 
         if service_plan
           server_payload['plan'] = {'code' => service_plan['code']}
@@ -1420,7 +1420,7 @@ class Morpheus::Cli::Clusters
         metadata_option_type = cluster_type['optionTypes'].find {|type| type['fieldName'] == 'metadata' }
         option_type_list = option_type_list.reject {|type| type['fieldName'] == 'metadata' }
 
-        server_payload.deep_merge!(Morpheus::Cli::OptionTypes.prompt(option_type_list, options[:options], @api_client, {zoneId: cloud['id'], siteId: group['id'], layoutId: layout['id']}))
+        server_payload.deep_merge!(Morpheus::Cli::OptionTypes.prompt(option_type_list, options[:options], @api_client, {zoneId: cloud['id'], siteId: group ? group['id'] : nil, layoutId: layout['id']}.compact))
 
         # Metadata Tags
         if metadata_option_type
@@ -4751,11 +4751,15 @@ class Morpheus::Cli::Clusters
           print_red_alert "No available groups"
           exit 1
         else available_groups.count > 1 && !options[:no_prompt]
-          group_id = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'group', 'type' => 'select', 'fieldLabel' => 'Group', 'selectOptions' => available_groups, 'required' => true, 'description' => 'Select Group.'}],options[:options],@api_client,{})['group']
+          group_id = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'group', 'type' => 'select', 'fieldLabel' => 'Group', 'selectOptions' => available_groups, 'required' => false, 'description' => 'Select Group.'}],options[:options],@api_client,{})['group']
         end
       end
     end
-    @groups_interface.get(group_id)['group']
+    if group_id
+      return @groups_interface.get(group_id)['group']
+    else 
+      return nil
+    end
   end
 
   def prompt_service_plan(api_params, options)
