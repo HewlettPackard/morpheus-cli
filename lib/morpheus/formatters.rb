@@ -1,7 +1,7 @@
 require 'time'
 require 'filesize'
-require 'money'
 require 'cgi'
+require 'morpheus/currency'
 
 DEFAULT_DATE_FORMAT = "%x"
 DEFAULT_TIME_FORMAT = "%x %I:%M %p"
@@ -403,8 +403,8 @@ def format_sig_dig(n, sigdig=3, min_sigdig=nil, pad_zeros=false)
   v
 end
 
-def currency_sym(currency)
-  Money::Currency.new((currency || 'USD').to_sym).symbol
+def currency_symbol(currency)
+  Morpheus::Currency.get_symbol(currency) || Morpheus::Currency.get_symbol("USD")
 end
 
 # returns currency amount formatted like "$4,5123.00". 0.00 is formatted as "$0"
@@ -418,16 +418,16 @@ def format_currency(amount, currency='USD', opts={})
 
   amount = amount.to_f
   if amount == 0
-    return currency_sym(currency).to_s + "0"
+    return currency_symbol(currency).to_s + "0"
   # elsif amount.to_f < 0.01
   #   # return exponent notation like 3.4e-09
-  #   return currency_sym(currency).to_s + "#{amount}"
+  #   return currency_symbol(currency).to_s + "#{amount}"
   else
     sigdig = opts[:sigdig] ? opts[:sigdig].to_i : 2 # max decimal digits
     min_sigdig = opts[:min_sigdig] ? opts[:min_sigdig].to_i : (sigdig || 2) # min decimal digits
     display_value = format_sig_dig(amount, sigdig, min_sigdig, opts[:pad_zeros])
     display_value = format_number(display_value) # commas
-    rtn = currency_sym(currency).to_s + display_value
+    rtn = currency_symbol(currency).to_s + display_value
     if amount.to_i < 0
       rtn = "(#{rtn})"
       if opts[:minus_color]

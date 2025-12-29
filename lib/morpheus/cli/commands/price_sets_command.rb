@@ -1,5 +1,4 @@
 require 'morpheus/cli/cli_command'
-require 'money'
 
 class Morpheus::Cli::PriceSetsCommand
   include Morpheus::Cli::CliCommand
@@ -153,7 +152,7 @@ class Morpheus::Cli::PriceSetsCommand
           {
               id: it['id'],
               name: it['name'],
-              pricing: (it['priceType'] == 'platform' ? '+' : '') + currency_sym(it['currency']) + (it['price'] || 0.0).to_s + (it['additionalPriceUnit'].nil? ? '' : '/' + it['additionalPriceUnit']) + '/' + (it['priceUnit'] || 'month').capitalize
+              pricing: (it['priceType'] == 'platform' ? '+' : '') + currency_symbol(it['currency']) + (it['price'] || 0.0).to_s + (it['additionalPriceUnit'].nil? ? '' : '/' + it['additionalPriceUnit']) + '/' + (it['priceUnit'] || 'month').capitalize
           }
         end
         print as_pretty_table(rows, [:id, :name, :pricing], options)
@@ -465,17 +464,13 @@ class Morpheus::Cli::PriceSetsCommand
 
   private
 
-  def currency_sym(currency)
-    Money::Currency.new((currency.to_s != '' ? currency : 'usd').to_sym).symbol
-  end
-
   def price_prefix(price)
-    (['platform', 'software'].include?(price['priceType']) ? '+' : '') + currency_sym(price['currency'])
+    (['platform', 'software'].include?(price['priceType']) ? '+' : '') + currency_symbol(price['currency'])
   end
 
   def price_markup(price)
     if price['markupType'] == 'fixed'
-      currency_sym(price['currency']) + format_amount(price['markup'] || 0)
+      currency_symbol(price['currency']) + format_amount(price['markup'] || 0)
     elsif price['markupType'] == 'percent'
       (price['markupPercent'] || 0).to_s + '%'
     else
