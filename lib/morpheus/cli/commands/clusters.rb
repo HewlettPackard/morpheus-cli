@@ -499,7 +499,7 @@ class Morpheus::Cli::Clusters
 
         # Group / Site
         group = load_group(cluster_type['code'], options)
-        cluster_payload['group'] = {'id' => group['id']}
+        cluster_payload['group'] = {'id' => group['id']} if group
 
         # Cluster Name
         if args.empty? && options[:no_prompt]
@@ -561,19 +561,19 @@ class Morpheus::Cli::Clusters
 
         # Cloud / Zone
         cloud_id = nil
-        cloud = options[:cloud] ? find_cloud_by_name_or_id_for_provisioning(group['id'], options[:cloud]) : nil
+        cloud = options[:cloud] ? find_cloud_by_name_or_id_for_provisioning(group ? group['id'] : nil, options[:cloud]) : nil
         if cloud
           # load full cloud
           cloud = @clouds_interface.get(cloud['id'])['zone']
           cloud_id = cloud['id']
         else
-          available_clouds = get_available_clouds(group['id'], {groupType: cluster_payload['type']})
+          available_clouds = get_available_clouds(group ? group['id'] : nil, {groupType: cluster_payload['type']})
 
           if available_clouds.empty?
-            print_red_alert "Group #{group['name']} has no available clouds"
+            print_red_alert group ? "Group #{group['name']} has no available clouds" : "No available clouds"
             exit 1
           else
-            cloud_id = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'cloud', 'type' => 'select', 'fieldLabel' => 'Cloud', 'selectOptions' => available_clouds, 'required' => true, 'description' => 'Select Cloud.'}],options[:options],@api_client,{groupId: group['id']})['cloud']
+            cloud_id = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'cloud', 'type' => 'select', 'fieldLabel' => 'Cloud', 'selectOptions' => available_clouds, 'required' => true, 'description' => 'Select Cloud.'}],options[:options],@api_client,{groupId: group ? group['id'] : nil})['cloud']
           end
           cloud = @clouds_interface.get(cloud_id)['zone']
         end
@@ -598,7 +598,7 @@ class Morpheus::Cli::Clusters
         # Provision Type
         provision_type = (layout && layout['provisionType'] ? layout['provisionType'] : nil) || get_provision_type_for_zone_type(cloud['zoneType']['id'])
         provision_type = @provision_types_interface.get(provision_type['id'])['provisionType'] if !provision_type.nil?
-        api_params = {zoneId: cloud['id'], siteId: group['id'], layoutId: layout['id'], groupTypeId: cluster_type['id'], provisionType: provision_type['code'], provisionTypeId: provision_type['id']}
+        api_params = {zoneId: cloud['id'], siteId: group ? group['id'] : nil, layoutId: layout['id'], groupTypeId: cluster_type['id'], provisionType: provision_type['code'], provisionTypeId: provision_type['id']}.compact
 
         # Service Plan
         service_plan = prompt_service_plan(api_params, options)
@@ -1344,7 +1344,7 @@ class Morpheus::Cli::Clusters
         server_payload['labels'] = labels if labels
 
         # Cloud
-        available_clouds = options_interface.options_for_source('clouds', {groupId: cluster['site']['id'], clusterId: cluster['id'], ownerOnly: true})['data']
+        available_clouds = options_interface.options_for_source('clouds', {groupId: cluster['site'] ? cluster['site']['id'] : nil, clusterId: cluster['id'], ownerOnly: true}.compact)['data']
         cloud_id = nil
 
         if options[:cloud]
@@ -1366,12 +1366,12 @@ class Morpheus::Cli::Clusters
         # resources (zone pools)
         cloud = @clouds_interface.get(cloud_id)['zone']
         cloud['zoneType'] = get_cloud_type(cloud['zoneType']['id'])
-        group = @groups_interface.get(cluster['site']['id'])['group']
+        group = cluster['site'] ? @groups_interface.get(cluster['site']['id'])['group'] : nil
         provision_type = server_type['provisionType'] || {}
         provision_type = @provision_types_interface.get(provision_type['id'])['provisionType'] if !provision_type.nil?
         
         server_payload['cloud'] = {'id' => cloud_id}
-        service_plan = prompt_service_plan({zoneId: cloud_id, siteId: cluster['site']['id'], provisionTypeId: server_type['provisionType']['id'], groupTypeId: cluster_type['id'], }, options)
+        service_plan = prompt_service_plan({zoneId: cloud_id, siteId: group ? group['id'] : nil, provisionTypeId: server_type['provisionType']['id'], groupTypeId: cluster_type['id']}.compact, options)
 
         if service_plan
           server_payload['plan'] = {'code' => service_plan['code']}
@@ -1420,7 +1420,7 @@ class Morpheus::Cli::Clusters
         metadata_option_type = cluster_type['optionTypes'].find {|type| type['fieldName'] == 'metadata' }
         option_type_list = option_type_list.reject {|type| type['fieldName'] == 'metadata' }
 
-        server_payload.deep_merge!(Morpheus::Cli::OptionTypes.prompt(option_type_list, options[:options], @api_client, {zoneId: cloud['id'], siteId: group['id'], layoutId: layout['id']}))
+        server_payload.deep_merge!(Morpheus::Cli::OptionTypes.prompt(option_type_list, options[:options], @api_client, {zoneId: cloud['id'], siteId: group ? group['id'] : nil, layoutId: layout['id']}.compact))
 
         # Metadata Tags
         if metadata_option_type
@@ -3410,12 +3410,7 @@ class Morpheus::Cli::Clusters
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage( "[cluster] [name] [options]")
       build_option_type_options(opts, options, add_affinity_group_option_types)
-      # opts.on('--refresh [SECONDS]', String, "Refresh until execution is complete. Default interval is #{default_refresh_interval} seconds.") do |val|
-      #   options[:refresh_interval] = val.to_s.empty? ? default_refresh_interval : val.to_f
-      # end
-      # opts.on(nil, '--no-refresh', "Do not refresh" ) do
-      #   options[:no_refresh] = true
-      # end
+      add_perms_options(opts, options, ['plans'])
       build_standard_add_options(opts, options)
       opts.footer = "Add affinity group to a cluster.\n" +
         "[cluster] is required. This is the name or id of an existing cluster.\n" +
@@ -3454,10 +3449,10 @@ class Morpheus::Cli::Clusters
         # end
 
         # perms
-        perms = prompt_permissions(options.merge({:for_affinity_group => true}), ['plans','groupDefaults'])
+        perms = prompt_permissions(options, is_master_account ? ['plans'] : ['plans', 'visibility', 'tenants'])
 
         affinity_group['resourcePermissions'] = perms['resourcePermissions'] unless perms['resourcePermissions'].nil?
-        affinity_group['tenants'] = perms['tenantPermissions'] unless perms['tenantPermissions'].nil?
+        affinity_group['tenants'] = perms['tenantPermissions'] unless perms['tenantPermissions'].nil? || perms['tenantPermissions']['accounts'].empty?
         affinity_group['visibility'] = perms['resourcePool']['visibility'] if !perms['resourcePool'].nil? && !perms['resourcePool']['visibility'].nil?
 
         payload = {'affinityGroup' => affinity_group}
@@ -3497,10 +3492,8 @@ class Morpheus::Cli::Clusters
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage( "[cluster] [affinity group] [options]")
-      opts.on('--active [on|off]', String, "Enable affinity group") do |val|
-        options[:active] = val.to_s == 'on' || val.to_s == 'true' || val.to_s == ''
-      end
-      # add_perms_options(opts, options, ['groupDefaults'])
+      build_option_type_options(opts, options, update_affinity_group_option_types)
+      add_perms_options(opts, options, ['plans'])
       build_standard_update_options(opts, options)
       opts.footer = "Update a cluster affinity group.\n" +
           "[cluster] is required. This is the name or id of an existing cluster.\n" +
@@ -3530,19 +3523,25 @@ class Morpheus::Cli::Clusters
         end
       else
         payload = {'affinityGroup' => {}}
-        payload['affinityGroup']['active'] = options[:active].nil? ? (Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox', 'description' => 'Active', 'defaultValue' => true}], options[:options], @api_client))['active'] == 'on' : options[:active]
-
-        perms = prompt_permissions(options.merge({:available_plans => namespace_service_plans}), affinity_group['owner']['id'] == current_user['accountId'] ? ['plans', 'groupDefaults'] : ['plans', 'groupDefaults', 'visibility', 'tenants'])
+        options[:params] ||= {}
+        options[:params].merge!({:serverGroupId => cluster['id']})
+        option_types = update_affinity_group_option_types
+        v_prompt = Morpheus::Cli::OptionTypes.no_prompt(option_types, options[:options], @api_client, options[:params])
+        v_prompt.deep_compact!.booleanize!
+        payload.deep_merge!({'affinityGroup' => v_prompt})
+        
+        perms = prompt_permissions(options.merge({:no_prompt => true}), is_master_account ? ['plans'] : ['plans', 'visibility', 'tenants'])
+        
         perms_payload = {}
-        perms_payload['resourcePermissions'] = perms['resourcePermissions'] if !perms['resourcePermissions'].nil?
-        perms_payload['tenantPermissions'] = perms['tenantPermissions'] if !perms['tenantPermissions'].nil?
-
-        payload['affinityGroup']['permissions'] = perms_payload
+        perms_payload['resourcePermissions'] = perms['resourcePermissions'] if !perms['resourcePermissions'].nil? && !perms['resourcePermissions'].empty?
+        perms_payload['tenantPermissions'] = perms['tenantPermissions'] if !perms['tenantPermissions'].nil? && !perms['tenantPermissions']['accounts'].empty?
+        
+        payload['affinityGroup']['permissions'] = perms_payload if !perms_payload.empty?
         payload['affinityGroup']['visibility'] = perms['resourcePool']['visibility'] if !perms['resourcePool'].nil? && !perms['resourcePool']['visibility'].nil?
 
         # support -O OPTION switch on top of everything
         if options[:options]
-          payload.deep_merge!({'affinityGroup' => options[:options].reject {|k,v| k.is_a?(Symbol) }})
+          payload.deep_merge!({'affinityGroup' => options[:options].reject {|k,v| k.is_a?(Symbol) || payload['affinityGroup'].key?(k) }})
         end
 
         if payload['affinityGroup'].nil? || payload['affinityGroup'].empty?
@@ -4752,11 +4751,15 @@ class Morpheus::Cli::Clusters
           print_red_alert "No available groups"
           exit 1
         else available_groups.count > 1 && !options[:no_prompt]
-          group_id = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'group', 'type' => 'select', 'fieldLabel' => 'Group', 'selectOptions' => available_groups, 'required' => true, 'description' => 'Select Group.'}],options[:options],@api_client,{})['group']
+          group_id = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'group', 'type' => 'select', 'fieldLabel' => 'Group', 'selectOptions' => available_groups, 'required' => false, 'description' => 'Select Group.'}],options[:options],@api_client,{})['group']
         end
       end
     end
-    @groups_interface.get(group_id)['group']
+    if group_id
+      return @groups_interface.get(group_id)['group']
+    else 
+      return nil
+    end
   end
 
   def prompt_service_plan(api_params, options)
@@ -4949,7 +4952,7 @@ class Morpheus::Cli::Clusters
       resource_pool = options[:resourcePool] ? find_cloud_resource_pool_by_name_or_id(cloud['id'], options[:resourcePool]) : nil
 
       if !resource_pool
-        resource_pool_options = @options_interface.options_for_source('zonePools', {groupId: group['id'], zoneId: cloud['id']}.merge(service_plan ? {planId: service_plan['id']} : {}))['data'].reject { |it| it['id'].nil? && it['name'].nil? }
+        resource_pool_options = @options_interface.options_for_source('zonePools', {groupId: group ? group['id'] : nil, zoneId: cloud['id'], planId: service_plan ? service_plan['id'] : nil}).compact['data'].reject { |it| it['id'].nil? && it['name'].nil? }
 
         if resource_pool_options.empty?
           print yellow,bold, "Cloud #{cloud['name']} has no available resource pools",reset,"\n\n"
@@ -5269,7 +5272,14 @@ class Morpheus::Cli::Clusters
       {'fieldName' => 'affinityType', 'fieldLabel' => 'Type', 'type' => 'select', 'selectOptions' => [{'name' => 'Keep Separate', 'value' => 'KEEP_SEPARATE'}, {'name' => 'Keep Together', 'value' => 'KEEP_TOGETHER'}], 'description' => 'Choose affinity type.', 'required' => true, 'defaultValue' => 'KEEP_SEPARATE'},
       {'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox', 'defaultValue' => true},
       # {'fieldName' => 'pool.id', 'fieldLabel' => 'Cluster', 'type' => 'select', 'optionSourceType' => 'vmware', 'optionSource' => 'vmwareZonePoolClusters', 'description' => 'Select cluster for the affinity group.', 'required' => true},
-      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiSelect', 'optionSource' => 'searchServers', 'description' => 'Select servers to be in the affinity group.'},
+      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers', 'description' => 'Select servers to be in the affinity group.'},
+    ]
+  end
+
+  def update_affinity_group_option_types
+    [
+      {'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox'},
+      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers', 'description' => 'Select servers to be in the affinity group.'},
     ]
   end
 

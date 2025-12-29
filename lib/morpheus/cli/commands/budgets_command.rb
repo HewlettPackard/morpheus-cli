@@ -1,5 +1,4 @@
 require 'morpheus/cli/cli_command'
-require 'money' # ew, let's write our own
 require 'time'
 
 class Morpheus::Cli::BudgetsCommand
