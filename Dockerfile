@@ -1,5 +1,5 @@
 FROM ruby:2.7.5
 
-RUN gem install morpheus-cli -v 8.0.12
+RUN gem install morpheus-cli -v 8.0.12.1
 
 ENTRYPOINT ["morpheus"]
