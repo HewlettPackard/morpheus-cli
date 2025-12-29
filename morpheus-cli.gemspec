@@ -31,6 +31,5 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'mime-types'
   spec.add_dependency "http"
   spec.add_dependency "rubyzip", '~> 2.3.2'
-  spec.add_dependency "money"
   spec.add_dependency "test-unit"
 end

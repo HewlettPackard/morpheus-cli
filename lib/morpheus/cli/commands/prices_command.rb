@@ -1,5 +1,4 @@
 require 'morpheus/cli/cli_command'
-require 'money'
 
 class Morpheus::Cli::PricesCommand
   include Morpheus::Cli::CliCommand
@@ -564,22 +563,13 @@ class Morpheus::Cli::PricesCommand
     (val.to_s =~ /\A\d{1,}\Z/) ? @prices_interface.get_volume_type(val.to_i)['volumeType'] : @prices_interface.list_volume_types({'name' => val})['volumeTypes'].first
   end
 
-  def currency_sym(currency)
-    begin
-      Money::Currency.new((currency.to_s.empty? ? 'usd' : currency).to_sym).symbol
-    rescue
-      # sometimes '' is getting passed in here, so figure that out...
-      Money::Currency.new(:usd).symbol
-    end
-  end
-
   def price_prefix(price)
-    (['platform', 'software'].include?(price['priceType']) ? '+' : '') + currency_sym(price['currency'])
+    (['platform', 'software'].include?(price['priceType']) ? '+' : '') + currency_symbol(price['currency'])
   end
 
   def price_markup(price)
     if price['markupType'] == 'fixed'
-      currency_sym(price['currency']) + format_amount(price['markup'] || 0)
+      currency_symbol(price['currency']) + format_amount(price['markup'] || 0)
     elsif price['markupType'] == 'percent'
       (price['markupPercent'] || 0).to_s + '%'
     else
