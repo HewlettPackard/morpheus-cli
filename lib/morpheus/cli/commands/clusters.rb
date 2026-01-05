@@ -5272,14 +5272,14 @@ class Morpheus::Cli::Clusters
       {'fieldName' => 'affinityType', 'fieldLabel' => 'Type', 'type' => 'select', 'selectOptions' => [{'name' => 'Keep Separate', 'value' => 'KEEP_SEPARATE'}, {'name' => 'Keep Together', 'value' => 'KEEP_TOGETHER'}], 'description' => 'Choose affinity type.', 'required' => true, 'defaultValue' => 'KEEP_SEPARATE'},
       {'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox', 'defaultValue' => true},
       # {'fieldName' => 'pool.id', 'fieldLabel' => 'Cluster', 'type' => 'select', 'optionSourceType' => 'vmware', 'optionSource' => 'vmwareZonePoolClusters', 'description' => 'Select cluster for the affinity group.', 'required' => true},
-      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers', 'description' => 'Select servers to be in the affinity group.'},
+      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers', 'searchParameter' => 'phrase', 'description' => 'Select servers to be in the affinity group.'},
     ]
   end
 
   def update_affinity_group_option_types
     [
       {'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox'},
-      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers', 'description' => 'Select servers to be in the affinity group.'},
+      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers', 'searchParameter' => 'phrase', 'description' => 'Select servers to be in the affinity group.'},
     ]
   end
 
