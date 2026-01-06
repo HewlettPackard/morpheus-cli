@@ -1578,10 +1578,24 @@ module Morpheus::Cli::PrintHelper
           rtn[:data] = config_map
           rtn[:success] = true
           break
+        rescue JSON::ParserError => ex
+          begin
+            fixed_config = config.dup
+            # Wrap bare ERB expressions (not already quoted) in quotes
+            # Matches: value: <%=...%> but not "value": "<%=...%>"
+            fixed_config.gsub!(/:\s*(<%[=:]([^%>]+)%>)(?=\s*[,}\]])/, ': "\1"')
+            config_map = JSON.parse(fixed_config)
+            rtn[:data] = config_map
+            rtn[:success] = true
+            break
+          rescue => ex
+            rtn[:error] = ex if rtn[:error].nil?
+          end
         rescue => ex
           rtn[:error] = ex if rtn[:error].nil?
         end
       end
+
     end
     return rtn
   end
