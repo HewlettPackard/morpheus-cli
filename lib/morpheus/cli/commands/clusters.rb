@@ -809,7 +809,7 @@ class Morpheus::Cli::Clusters
           elsif server_payload['sshHosts'].is_a?(Array)
             server_payload['sshHosts'] = server_payload['sshHosts'].collect {|it| it.is_a?(String) ? {"ip" => it} : it }
           end
-
+          server_payload['sshHosts'] = server_payload['sshHosts'].flatten
           # inject the optionalNames array into the sshHosts if present
           if server_payload['optionalNames']
             optional_names = server_payload['optionalNames'].is_a?(String) ? server_payload['optionalNames'].split(",") : [server_payload['optionalNames']].flatten
