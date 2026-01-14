@@ -168,6 +168,7 @@ class Morpheus::Cli::ServicePlanCommand
       description_cols['Core Count'] = lambda {|it| it['maxCores']}
       description_cols['Custom Cores'] = lambda {|it| format_boolean(it['customCores'])}
       description_cols['Cores Per Socket'] = lambda {|it| it['coresPerSocket']} if provision_type['hasConfigurableCpuSockets'] && service_plan['customCores']
+      description_cols['Custom CPU'] = lambda {|it| format_boolean(it['customCpu'])}
 
       ranges = (service_plan['config'] ? service_plan['config']['ranges'] : nil) || {}
 
@@ -278,6 +279,9 @@ class Morpheus::Cli::ServicePlanCommand
       end
       opts.on('--custom-cores [on|off]', String, "Can be used to enable / disable customizable cores. Default is on") do |val|
         params['customCores'] = val.to_s == 'on' || val.to_s == 'true' || val.to_s == '1' || val.to_s == ''
+      end
+      opts.on('--custom-cpu [on|off]', String, "Can be used to enable / disable customizable CPUs. Default is on") do |val|
+        params['customCpu'] = val.to_s == 'on' || val.to_s == 'true' || val.to_s == '1' || val.to_s == ''
       end
       opts.on('--custom-storage [on|off]', String, "Can be used to enable / disable customizable storage. Default is on") do |val|
         params['customMaxStorage'] = val.to_s == 'on' || val.to_s == 'true' || val.to_s == '1' || val.to_s == ''
@@ -550,6 +554,9 @@ class Morpheus::Cli::ServicePlanCommand
       end
       opts.on('--custom-cores [on|off]', String, "Can be used to enable / disable customizable cores. Default is on") do |val|
         params['customCores'] = val.to_s == 'on' || val.to_s == 'true' || val.to_s == '1' || val.to_s == ''
+      end
+      opts.on('--custom-cpu [on|off]', String, "Can be used to enable / disable customizable CPUs. Default is on") do |val|
+        params['customCpu'] = val.to_s == 'on' || val.to_s == 'true' || val.to_s == '1' || val.to_s == ''
       end
       opts.on('--custom-storage [on|off]', String, "Can be used to enable / disable customizable storage. Default is on") do |val|
         params['customMaxStorage'] = val.to_s == 'on' || val.to_s == 'true' || val.to_s == '1' || val.to_s == ''
