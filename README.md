@@ -1,7 +1,7 @@
 <img src="https://morpheusdata.com/wp-content/uploads/2020/04/morpheus-logo-v2.svg" width="200px">
 
 # Morpheus CLI
-#
+
 - Website: https://www.morpheusdata.com/
 - Guide: [Morpheus CLI Wiki](https://github.com/gomorpheus/morpheus-cli/wiki)
 - Docs: [Morpheus CLI Documentation](https://clidocs.morpheusdata.com)
