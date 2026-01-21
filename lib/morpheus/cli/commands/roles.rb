@@ -5,7 +5,7 @@ class Morpheus::Cli::Roles
   include Morpheus::Cli::AccountsHelper
   include Morpheus::Cli::ProvisioningHelper
   include Morpheus::Cli::WhoamiHelper
-  register_subcommands :list, :get, :add, :update, :remove, 
+  register_subcommands :list, :get, :add, :update, :remove, :validate,
     :'list-permissions', :'update-feature-access',
     :'update-group-access', :'update-global-group-access', :'update-default-group-access',
     :'update-global-cloud-access', :'update-cloud-access', :'update-default-cloud-access',
@@ -869,6 +869,82 @@ EOT
     rescue RestClient::Exception => e
       print_rest_exception(e, options)
       exit 1
+    end
+  end
+
+  def validate(args)
+    options = {}
+    params = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[options]")
+      build_option_type_options(opts, options, add_role_option_types)
+      build_role_access_options(opts, options, params)
+      build_common_options(opts, options, [:options, :payload, :json, :dry_run, :remote])
+      opts.footer = <<-EOT
+Validate role permissions without creating or updating a role.
+This is useful for testing permission configurations before applying them.
+All the role permissions and access values can be validated.
+Use --feature-access "CODE=ACCESS,CODE=ACCESS" to validate access levels for specific feature permissions.
+Example: morpheus roles validate --authority "Test Role" --feature-access "admin=full,activity=read"
+EOT
+    end
+    optparse.parse!(args)
+    
+    connect(options)
+    begin
+      account = find_account_from_options(options)
+      account_id = account ? account['id'] : nil
+
+      passed_options = options[:options] ? options[:options].reject {|k,v| k.is_a?(Symbol) } : {}
+      payload = nil
+      
+      if options[:payload]
+        payload = options[:payload]
+        payload.deep_merge!({'role' => passed_options}) unless passed_options.empty?
+      else
+        # merge -O options into normally parsed options
+        params.deep_merge!(passed_options)
+        
+        # Parse role access options
+        parse_role_access_options(options, params)
+        
+        if params.empty? && passed_options.empty?
+          raise_command_error "Specify at least one role configuration option to validate.\n#{optparse}"
+        end
+        
+        payload = {"role" => params}
+      end
+      
+      query_params = parse_query_options(options)
+      @roles_interface.setopts(options)
+      
+      if options[:dry_run]
+        print_dry_run @roles_interface.dry.validate(account_id, payload, query_params)
+        return 0, nil
+      end
+      
+      json_response = @roles_interface.validate(account_id, payload, query_params)
+      
+      render_response(json_response, options) do
+        if json_response['success'] && json_response['valid']
+          print_green_success json_response['msg'] || "Role permissions are valid"
+        else
+          print_red_alert "Validation failed: #{json_response['msg'] || 'Invalid role permissions'}"
+          if json_response['errors'] && !json_response['errors'].empty?
+            print_h2 "Validation Errors", options
+            json_response['errors'].each do |key, msg|
+              print red, "  #{key}: #{msg}", reset, "\n"
+            end
+          end
+        end
+      end
+      
+      # Return exit code based on validation result
+      return json_response['success'] && json_response['valid'] ? 0 : 1
+      
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      return 1
     end
   end
 
