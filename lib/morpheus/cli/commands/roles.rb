@@ -876,24 +876,36 @@ EOT
     options = {}
     params = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
-      opts.banner = subcommand_usage("[options]")
+      opts.banner = subcommand_usage("[role] [options]")
       build_option_type_options(opts, options, add_role_option_types)
       build_role_access_options(opts, options, params)
       build_common_options(opts, options, [:options, :payload, :json, :dry_run, :remote])
       opts.footer = <<-EOT
 Validate role permissions without creating or updating a role.
+[role] is optional. This is the name (authority) or id of a role.
 This is useful for testing permission configurations before applying them.
 All the role permissions and access values can be validated.
 Use --feature-access "CODE=ACCESS,CODE=ACCESS" to validate access levels for specific feature permissions.
 Example: morpheus roles validate --authority "Test Role" --feature-access "admin=full,activity=read"
+Example: morpheus roles validate "Existing Role" --feature-access "activity=full"
 EOT
     end
     optparse.parse!(args)
+    
+    # allow 0-1 arguments
+    verify_args!(args:args, optparse:optparse, max:1)
     
     connect(options)
     begin
       account = find_account_from_options(options)
       account_id = account ? account['id'] : nil
+
+      # load existing role if arg passed
+      role = nil
+      if args[0]
+        role = find_role_by_name_or_id(account_id, args[0])
+        exit 1 if role.nil?
+      end
 
       passed_options = options[:options] ? options[:options].reject {|k,v| k.is_a?(Symbol) } : {}
       payload = nil
@@ -908,11 +920,15 @@ EOT
         # Parse role access options
         parse_role_access_options(options, params)
         
-        if params.empty? && passed_options.empty?
+        if params.empty? && passed_options.empty? && role.nil?
           raise_command_error "Specify at least one role configuration option to validate.\n#{optparse}"
         end
         
         payload = {"role" => params}
+      end
+      
+      if role
+        payload['role']['id'] = role['id']
       end
       
       query_params = parse_query_options(options)
