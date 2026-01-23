@@ -316,9 +316,8 @@ EOT
         parse_result = parse_json_or_yaml(file_content)
         config_map = parse_result[:data]
         if config_map.nil?
-          # todo: bubble up JSON.parse error message
-          raise_command_error "Failed to parse config as YAML or JSON. Error: #{parse_result[:error]}"
-          #raise_command_error "Failed to parse config as valid YAML or JSON."
+          params['config'] = file_content
+          Morpheus::Logging::DarkPrinter.puts "Failed to parse config as JSON or YAML. Defaulting to String."
         else
           params['config'] = config_map
           options[:options]['config'] = params['config'] # or file_content
@@ -386,9 +385,8 @@ EOT
         parse_result = parse_json_or_yaml(config)
         config_map = parse_result[:data]
         if config_map.nil?
-          # todo: bubble up JSON.parse error message
-          raise_command_error "Failed to parse config as YAML or JSON. Error: #{parse_result[:error]}"
-          #raise_command_error "Failed to parse config as valid YAML or JSON."
+          params['config'] = config
+          Morpheus::Logging::DarkPrinter.puts "Failed to parse config as JSON or YAML. Defaulting to String."
         else
           params['config'] = config_map
         end
@@ -466,9 +464,8 @@ EOT
         parse_result = parse_json_or_yaml(file_content)
         config_map = parse_result[:data]
         if config_map.nil?
-          # todo: bubble up JSON.parse error message
-          raise_command_error "Failed to parse config as YAML or JSON. Error: #{parse_result[:error]}"
-          #raise_command_error "Failed to parse config as valid YAML or JSON."
+          params['config'] = file_content
+          Morpheus::Logging::DarkPrinter.puts "Failed to parse config as JSON or YAML. Defaulting to String."
         else
           params['config'] = config_map
           options[:options]['config'] = params['config'] # or file_content
@@ -529,9 +526,8 @@ EOT
         parse_result = parse_json_or_yaml(config)
         config_map = parse_result[:data]
         if config_map.nil?
-          # todo: bubble up JSON.parse error message
-          raise_command_error "Failed to parse config as YAML or JSON. Error: #{parse_result[:error]}"
-          #raise_command_error "Failed to parse config as valid YAML or JSON."
+          params['config'] = config
+          Morpheus::Logging::DarkPrinter.puts "Failed to parse config as JSON or YAML. Defaulting to String."
         else
           params['config'] = config_map
         end
