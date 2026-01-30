@@ -117,6 +117,8 @@ module Morpheus::Cli::BackupsHelper
     {
       "ID" => 'id',
       "Backup" => lambda {|it| it['backup']['name'] rescue '' },
+      "Type" => lambda {|it| format_backup_result_type_tag(it) },
+      "Location" => lambda {|it| format_backup_result_location_tag(it) },
       "Status" => lambda {|it| format_backup_result_status(it) },
       #"Duration" => lambda {|it| format_duration(it['startDate'], it['endDate']) },
       "Duration" => lambda {|it| format_duration_milliseconds(it['durationMillis']) if it['durationMillis'].to_i > 0 },
@@ -167,6 +169,32 @@ module Morpheus::Cli::BackupsHelper
 
   def format_backup_restore_status(backup_restore, return_color=cyan)
     format_backup_result_status(backup_restore, return_color)
+  end
+
+  # format backup result type tag based on associated backup data
+  def format_backup_result_type_tag(backup_result)
+    backup = backup_result['backup'] || {}
+    if backup['cronExpression'] || (backup['schedule'] && backup['schedule']['id']) || (backup['job'] && backup['job']['id'])
+      "#{cyan}POLICY#{reset}"
+    else
+      "#{yellow}MANUAL#{reset}"
+    end
+  end
+
+  # format backup result location tag based on storage provider
+  def format_backup_result_location_tag(backup_result)
+    backup = backup_result['backup'] || {}
+    if backup_result['storageProvider'] && backup_result['storageProvider']['id']
+      "#{green}REMOTE#{reset}"
+    elsif backup['storageProvider'] && backup['storageProvider']['id']
+      "#{green}REMOTE#{reset}"
+    elsif backup_result['backupProvider'] && backup_result['backupProvider']['id']
+      "#{green}REMOTE#{reset}"
+    elsif backup['backupProvider'] && backup['backupProvider']['id']
+      "#{green}REMOTE#{reset}"
+    else
+      "#{blue}LOCAL#{reset}"
+    end
   end
   
 end
