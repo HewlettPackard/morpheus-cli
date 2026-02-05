@@ -661,6 +661,12 @@ EOT
         if options[:group_permissions] && params['roleType'] == 'account'
           raise_command_error "The --groups option is only available for account roles, not user roles"
         end
+        if params['globalZoneAccess'] && params['roleType'] == 'user'
+          raise_command_error "The --default-cloud-access option is only available for account roles, not user roles"
+        end
+        if params['globalSiteAccess'] && params['roleType'] == 'account'
+          raise_command_error "The --default-group-access option is only available for user roles, not account roles"
+        end
 
         v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'baseRole', 'fieldLabel' => 'Copy From Role', 'type' => 'select', 'selectOptions' => base_role_options(params), 'displayOrder' => 5}], options[:options])
         if v_prompt['baseRole'].to_s != ''
@@ -792,6 +798,12 @@ EOT
         if options[:group_permissions] && role['roleType'] == 'account'
           raise_command_error "The --groups option is only available for account roles, not user roles"
         end
+        if params['globalZoneAccess'] && role['roleType'] == 'user'
+          raise_command_error "The --default-cloud-access option is only available for account roles, not user roles"
+        end
+        if params['globalSiteAccess'] && role['roleType'] == 'account'
+          raise_command_error "The --default-group-access option is only available for user roles, not account roles"
+        end
         # bulk role permissions
         parse_role_access_options(options, params)
 
@@ -920,6 +932,17 @@ EOT
         # Parse role access options
         parse_role_access_options(options, params)
         
+        # Validate role type constraints
+        role_type = role ? role['roleType'] : params['roleType']
+        if role_type
+          if params['globalZoneAccess'] && role_type == 'user'
+            raise_command_error "The --default-cloud-access option is only available for account roles, not user roles"
+          end
+          if params['globalSiteAccess'] && role_type == 'account'
+            raise_command_error "The --default-group-access option is only available for user roles, not account roles"
+          end
+        end
+
         if params.empty? && passed_options.empty? && role.nil?
           raise_command_error "Specify at least one role configuration option to validate.\n#{optparse}"
         end
@@ -1070,6 +1093,10 @@ EOT
       account_id = account ? account['id'] : nil
       role = find_role_by_name_or_id(account_id, name)
       exit 1 if role.nil?
+
+      if role['roleType'] == 'account'
+        raise_command_error "The default-group-access command is only available for user roles, not account roles"
+      end
 
       params = {permissionCode: 'ComputeSite', access: access_value}
       @roles_interface.setopts(options)
@@ -1223,6 +1250,10 @@ EOT
       account_id = account ? account['id'] : nil
       role = find_role_by_name_or_id(account_id, name)
       exit 1 if role.nil?
+
+      if role['roleType'] == 'user'
+        raise_command_error "The default-cloud-access command is only available for account roles, not user roles"
+      end
 
       params = {permissionCode: 'ComputeZone', access: access_value}
       @roles_interface.setopts(options)
