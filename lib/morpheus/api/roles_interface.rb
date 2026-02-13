@@ -118,6 +118,13 @@ class Morpheus::RolesInterface < Morpheus::APIClient
     execute(method: :put, url: url, headers: headers, payload: payload.to_json)
   end
 
+  def update_cluster_type(account_id, id, options)
+    url = build_url(account_id, id) + "/update-cluster-type"
+    headers = { :authorization => "Bearer #{@access_token}", 'Content-Type' => 'application/json' }
+    payload = options
+    execute(method: :put, url: url, headers: headers, payload: payload.to_json)
+  end
+
   def validate(account_id, options, params={})
     url = "#{@base_url}/api/roles/validate"
     headers = { :authorization => "Bearer #{@access_token}", 'Content-Type' => 'application/json' }
