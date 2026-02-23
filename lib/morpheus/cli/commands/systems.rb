@@ -55,6 +55,45 @@ class Morpheus::Cli::Systems
     end
   end
 
+  def remove(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system]")
+      build_standard_remove_options(opts, options)
+      opts.footer = <<-EOT
+Delete an existing system.
+[system] is required. This is the name or id of a system.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args: args, optparse: optparse, count: 1)
+    connect(options)
+
+    system = nil
+    if args[0].to_s =~ /\A\d{1,}\Z/
+      json_response = rest_interface.get(args[0].to_i)
+      system = json_response[rest_object_key] || json_response
+    else
+      system = find_by_name(rest_key, args[0])
+    end
+    return 1, "System not found for '#{args[0]}'" if system.nil?
+
+    unless options[:yes] || Morpheus::Cli::OptionTypes.confirm("Are you sure you want to delete the system #{system['name']}?")
+      return 9, "aborted"
+    end
+
+    if options[:dry_run]
+      print_dry_run rest_interface.dry.destroy(system['id'])
+      return
+    end
+
+    rest_interface.setopts(options)
+    json_response = rest_interface.destroy(system['id'])
+    render_response(json_response, options) do
+      print_green_success "System #{system['name']} removed"
+    end
+  end
+
   def update(args)
     options = {}
     params = {}
