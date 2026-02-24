@@ -45,6 +45,7 @@ module Morpheus::Cli::AccountsHelper
       "# Instances" => 'stats.instanceCount',
       "# Users" => 'stats.userCount',
       "Role" => lambda {|it| it['role']['authority'] rescue nil },
+      "Parent Tenant" => lambda {|it| it['parent']['name'] rescue nil },
       "Master" => lambda {|it| format_boolean(it['master']) },
       "Currency" => 'currency',
       "Status" => lambda {|it| 

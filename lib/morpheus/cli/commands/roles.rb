@@ -2963,7 +2963,7 @@ Update default cluster type access for a role.
     opts.on('--default-cluster-type-access ACCESS', String, "Set the default cluster type access: [none|full]" ) do  |val|
       params['globalTaskSetAccess'] = val.to_s.downcase
     end
-    opts.on('--cluster-types ID=ACCESS', String, "Set cluster type to a custom access by workflow id. Example: 1=none,2=full" ) do |val|
+    opts.on('--cluster-types CODE=ACCESS', String, "Set cluster type to a custom access by cluster type code. Example: kubernetes-cluster=none,mvm-cluster=full" ) do |val|
       options[:cluster_type_permissions] ||= {}
       parse_access_csv(options[:cluster_type_permissions], val)
     end
