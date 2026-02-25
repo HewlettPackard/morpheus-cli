@@ -1052,6 +1052,10 @@ class Morpheus::APIClient
   end
   alias :get_interface :interface
 
+  def support_bundles
+    Morpheus::SupportBundlesInterface.new(common_interface_options).setopts(@options)
+  end
+
   # add new interfaces here
 
   protected
