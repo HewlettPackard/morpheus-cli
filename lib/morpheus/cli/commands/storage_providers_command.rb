@@ -513,8 +513,12 @@ class Morpheus::Cli::StorageProvidersCommand
 
   def remove(args)
     options = {}
+    params = {:removeResources => 'on'}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[storage-bucket]")
+      opts.on('--remove-resources [on|off]', ['on','off'], "Remove From Server. Default is on.") do |val|
+        params[:removeResources] = val.nil? ? 'on' : val
+      end
       build_common_options(opts, options, [:auto_confirm, :json, :dry_run, :remote])
       opts.footer = "Delete a storage bucket." + "\n" +
                     "[storage-bucket] is required. This is the name or id of a storage bucket."
@@ -537,10 +541,10 @@ class Morpheus::Cli::StorageProvidersCommand
       end
       @storage_providers_interface.setopts(options)
       if options[:dry_run]
-        print_dry_run @storage_providers_interface.dry.destroy(storage_provider['id'])
+        print_dry_run @storage_providers_interface.dry.destroy(storage_provider['id'], params)
         return 0
       end
-      json_response = @storage_providers_interface.destroy(storage_provider['id'])
+      json_response = @storage_providers_interface.destroy(storage_provider['id'], params)
       if options[:json]
         print JSON.pretty_generate(json_response)
         print "\n"

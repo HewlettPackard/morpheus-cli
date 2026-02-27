@@ -412,6 +412,14 @@ class Morpheus::APIClient
     Morpheus::ServersInterface.new(common_interface_options).setopts(@options)
   end
 
+  def systems
+    Morpheus::SystemsInterface.new(common_interface_options).setopts(@options)
+  end
+
+  def system_types
+    Morpheus::SystemTypesInterface.new(common_interface_options).setopts(@options)
+  end
+
   def server_devices
     Morpheus::ServerDevicesInterface.new(common_interface_options).setopts(@options)
   end

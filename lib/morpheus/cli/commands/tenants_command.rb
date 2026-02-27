@@ -3,6 +3,7 @@ require 'morpheus/cli/cli_command'
 class Morpheus::Cli::TenantsCommand
   include Morpheus::Cli::CliCommand
   include Morpheus::Cli::AccountsHelper
+  include Morpheus::Cli::WhoamiHelper
   set_command_name :tenants
   set_command_description "View and manage tenants (accounts)."
   register_subcommands :list, :count, :get, :add, :update, :remove
@@ -21,6 +22,7 @@ class Morpheus::Cli::TenantsCommand
     @account_users_interface = @api_client.account_users
     @accounts_interface = @api_client.accounts
     @roles_interface = @api_client.roles
+    @whoami_interface = @api_client.whoami
   end
 
   def handle(args)
@@ -286,18 +288,25 @@ EOT
     [
       {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text', 'required' => true, 'displayOrder' => 1},
       {'fieldName' => 'description', 'fieldLabel' => 'Description', 'type' => 'text', 'displayOrder' => 2},
-      {'fieldContext' => 'role', 'fieldName' => 'id', 'fieldLabel' => 'Base Role', 'type' => 'select', 'optionSource' => lambda {  |api_client, api_params|
-        @roles_interface.list(nil, {roleType:'account'})['roles'].collect {|it|
+      {'fieldContext' => 'parentAccount', 'fieldName' => 'id', 'fieldLabel' => 'Parent Tenant', 'type' => 'select', 'optionSource' => lambda {  |api_client, api_params|
+        @accounts_interface.list({max:10000})['accounts'].collect {|it|
           {"name" => (it["authority"] || it["name"]), "value" => it["id"]}
         }
       }, 'displayOrder' => 3},
+      {'fieldContext' => 'role', 'fieldName' => 'id', 'fieldLabel' => 'Base Role', 'type' => 'select', 'optionSource' => lambda {  |api_client, api_params|
+        tenant_id = (api_params['parentAccount']['id'] rescue nil)
+        params = {max: 10000, roleType:'account', tenantId: tenant_id}
+        @roles_interface.list(nil, params)['roles'].collect {|it|
+          {"name" => (it["authority"] || it["name"]), "value" => it["id"]}
+        }
+      }, 'displayOrder' => 4},
       {'fieldName' => 'currency', 'fieldLabel' => 'Currency', 'type' => 'text', 'defaultValue' => 'USD', 'displayOrder' => 4}
     ]
   end
 
   def update_account_option_types
     list = add_account_option_types()
-    # list = list.reject {|it| ["interval"].include? it['fieldName'] }
+    list = list.reject {|it| it['fieldContext'] == 'parentAccount' }
     list.each {|it| it.delete('required') }
     list.each {|it| it.delete('defaultValue') }
     list

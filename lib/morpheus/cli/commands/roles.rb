@@ -5,7 +5,7 @@ class Morpheus::Cli::Roles
   include Morpheus::Cli::AccountsHelper
   include Morpheus::Cli::ProvisioningHelper
   include Morpheus::Cli::WhoamiHelper
-  register_subcommands :list, :get, :add, :update, :remove, 
+  register_subcommands :list, :get, :add, :update, :remove, :validate,
     :'list-permissions', :'update-feature-access',
     :'update-group-access', :'update-global-group-access', :'update-default-group-access',
     :'update-global-cloud-access', :'update-cloud-access', :'update-default-cloud-access',
@@ -16,7 +16,8 @@ class Morpheus::Cli::Roles
     :'update-global-vdi-pool-access', :'update-vdi-pool-access', :'update-default-vdi-pool-access',
     :'update-global-report-type-access', :'update-report-type-access', :'update-default-report-type-access',
     :'update-global-task-access', :'update-task-access', :'update-default-task-access',
-    :'update-global-workflow-access', :'update-workflow-access', :'update-default-workflow-access'
+    :'update-global-workflow-access', :'update-workflow-access', :'update-default-workflow-access',
+    :'update-cluster-type-access', :'update-default-cluster-type-access'
   set_subcommands_hidden(
     subcommands.keys.select{|c|
     c.include?('update-global')
@@ -136,6 +137,9 @@ class Morpheus::Cli::Roles
       opts.on(nil,'--task-access', "Display Task Access") do
         options[:include_task_access] = true
       end
+      opts.on(nil,'--cluster-type-access', "Display Cluster Type Access") do
+        options[:include_cluster_type_access] = true
+      end
       opts.on('-a','--all', "Display All Access Lists") do
         options[:include_all_access] = true
       end
@@ -143,9 +147,7 @@ class Morpheus::Cli::Roles
         options[:include_default_access] = true
       end
       opts.on('--account-id ID', String, "Clarify Owner of Role") do |val|
-        if has_complete_access
-          options[:account_id] = val.to_s
-        end
+        options[:account_id] = val.to_s
       end
       build_standard_get_options(opts, options)
       opts.footer = <<-EOT
@@ -246,6 +248,7 @@ EOT
         "VDI Pools" => lambda {|it| get_access_string(it['globalVdiPoolAccess']) },
         "Workflows" => lambda {|it| get_access_string(it['globalTaskSetAccess']) },
         "Tasks" => lambda {|it| get_access_string(it['globalTaskAccess']) },
+        "Cluster Types" => lambda {|it| get_access_string(it['globalClusterTypeAccess']) },
       }
 
       if role['roleType'].to_s.downcase == 'account'
@@ -449,7 +452,7 @@ EOT
       workflow_permissions = role['taskSets'] ? role['taskSets'] : (json_response['taskSetPermissions'] || [])
       print cyan
       if options[:include_workflow_access] || options[:include_all_access]
-        print_h2 "Workflow", options
+        print_h2 "Workflow Access", options
         rows = workflow_permissions.collect do |it|
           {
             name: it['name'],
@@ -461,9 +464,30 @@ EOT
         end
         print as_pretty_table(rows, [:name, :access], options)
       elsif workflow_permissions.find {|it| it['access'] && it['access'] != 'default'}
-        print_h2 "Workflow", options
+        print_h2 "Workflow Access", options
         print cyan,"Use --workflow-access to list custom access","\n"
       end
+
+      cluster_type_global_access = json_response['globalClusterTypeAccess']
+      cluster_type_permissions = role['clusterTypes'] ? role['clusterTypes'] : (json_response['clusterTypePermissions'] || [])
+      print cyan
+      if options[:include_cluster_type_access] || options[:include_all_access]
+        print_h2 "Cluster Type Access", options
+        rows = cluster_type_permissions.collect do |it|
+          {
+            name: it['name'],
+            access: format_access_string(it['access'], ["none","full"]),
+          }
+        end
+        if !options[:include_default_access]
+          rows = rows.select {|row| row[:access] && row[:access] != 'default '}
+        end
+        print as_pretty_table(rows, [:name, :access], options)
+      elsif cluster_type_permissions.find {|it| it['access'] && it['access'] != 'default'}
+        print_h2 "Cluster Type Access", options
+        print cyan,"Use --cluster-type-access to list custom access","\n"
+      end
+
       print reset,"\n"
       return 0, nil
     end
@@ -471,7 +495,7 @@ EOT
 
   def list_permissions(args)
     options = {}
-    available_categories = ['feature', 'group', 'cloud', 'instance-type', 'blueprint', 'report-type', 'persona', 'catalog-item-type', 'vdi-pool', 'workflow', 'task']
+    available_categories = ['feature', 'group', 'cloud', 'instance-type', 'blueprint', 'report-type', 'persona', 'catalog-item-type', 'vdi-pool', 'workflow', 'task', 'cluster-type']
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[role] [category]")
       build_common_options(opts, options, [:list, :json, :yaml, :csv, :fields, :dry_run, :remote])
@@ -585,7 +609,7 @@ EOT
       opts.banner = subcommand_usage("[name] [options]")
       build_option_type_options(opts, options, add_role_option_types)
       build_role_access_options(opts, options, params)
-      opts.on('--owner ID', String, "Set the owner/tenant/account for the role by account id. Only master tenants with full permission for Tenant and Role may use this option." ) do |val|
+      opts.on('--owner ID', String, "Set the owner/tenant/account for the role by account id. This option requires the admin permission to manage tenants." ) do |val|
         params['owner'] = val
       end
       opts.on(nil, '--include-default-access', "Include default access levels in the response (returns all available resources)") do
@@ -631,24 +655,19 @@ EOT
         params['authority'] = v_prompt['authority']
         v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'description', 'fieldLabel' => 'Description', 'type' => 'text', 'displayOrder' => 2}], options[:options])
         params['description'] = v_prompt['description']
-        v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'landingUrl', 'fieldLabel' => 'landingUrl', 'type' => 'text', 'displayOrder' => 3, 'description' => 'An optional override for the default landing page after login for a user.'}], options[:options])
+        v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'landingUrl', 'fieldLabel' => 'Landing URL', 'type' => 'text', 'displayOrder' => 3, 'description' => 'An optional override for the default landing page after login for a user.'}], options[:options])
         params['landingUrl'] = v_prompt['landingUrl']
 
-        if params['owner']
-          if @is_master_account && has_complete_access
-            params['owner'] = params['owner']
-          else
-            print_red_alert "You do not have the necessary authority to use owner option"
-            return
-          end
-        elsif @is_master_account && has_complete_access
+        can_manage_accounts = @user_permissions.find { |it| it['code'] == 'admin-accounts' && it['access'] == 'full'}
+
+        if can_manage_accounts
           v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'owner', 'fieldLabel' => 'Owner', 'type' => 'select', 'selectOptions' => role_owner_options, 'defaultValue' => current_account['id'], 'displayOrder' => 3}], options[:options])
           params['owner'] = v_prompt['owner']
         else
           params['owner'] = current_account['id']
         end  
 
-        if @is_master_account && params['owner'] == current_account['id']
+        if can_manage_accounts
           v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'roleType', 'fieldLabel' => 'Type', 'type' => 'select', 'selectOptions' => role_type_options, 'defaultValue' => 'user', 'displayOrder' => 4}], options[:options])
           params['roleType'] = v_prompt['roleType']
         else
@@ -660,6 +679,12 @@ EOT
         end
         if options[:group_permissions] && params['roleType'] == 'account'
           raise_command_error "The --groups option is only available for account roles, not user roles"
+        end
+        if params['globalZoneAccess'] && params['roleType'] == 'user'
+          raise_command_error "The --default-cloud-access option is only available for account roles, not user roles"
+        end
+        if params['globalSiteAccess'] && params['roleType'] == 'account'
+          raise_command_error "The --default-group-access option is only available for user roles, not account roles"
         end
 
         v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'baseRole', 'fieldLabel' => 'Copy From Role', 'type' => 'select', 'selectOptions' => base_role_options(params), 'displayOrder' => 5}], options[:options])
@@ -779,9 +804,9 @@ EOT
         # merge -O options into normally parsed options
         params.deep_merge!(passed_options)
         prompt_option_types = update_role_option_types()
-        if !@is_master_account
-          prompt_option_types = prompt_option_types.reject {|it| ['roleType', 'multitenant','multitenantLocked'].include?(it['fieldName']) }
-        end
+        # if !has_complete_access
+        #   prompt_option_types = prompt_option_types.reject {|it| ['roleType', 'multitenant','multitenantLocked'].include?(it['fieldName']) }
+        # end
         if role['roleType'] != 'user'
           prompt_option_types = prompt_option_types.reject {|it| ['multitenant','multitenantLocked'].include?(it['fieldName']) }
         end
@@ -791,6 +816,12 @@ EOT
         end
         if options[:group_permissions] && role['roleType'] == 'account'
           raise_command_error "The --groups option is only available for account roles, not user roles"
+        end
+        if params['globalZoneAccess'] && role['roleType'] == 'user'
+          raise_command_error "The --default-cloud-access option is only available for account roles, not user roles"
+        end
+        if params['globalSiteAccess'] && role['roleType'] == 'account'
+          raise_command_error "The --default-group-access option is only available for user roles, not account roles"
         end
         # bulk role permissions
         parse_role_access_options(options, params)
@@ -869,6 +900,109 @@ EOT
     rescue RestClient::Exception => e
       print_rest_exception(e, options)
       exit 1
+    end
+  end
+
+  def validate(args)
+    options = {}
+    params = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[role] [options]")
+      build_option_type_options(opts, options, add_role_option_types)
+      build_role_access_options(opts, options, params)
+      build_common_options(opts, options, [:options, :payload, :json, :dry_run, :remote])
+      opts.footer = <<-EOT
+Validate role permissions without creating or updating a role.
+[role] is optional. This is the name (authority) or id of a role.
+This is useful for testing permission configurations before applying them.
+All the role permissions and access values can be validated.
+Use --feature-access "CODE=ACCESS,CODE=ACCESS" to validate access levels for specific feature permissions.
+Example: morpheus roles validate --authority "Test Role" --feature-access "admin=full,activity=read"
+Example: morpheus roles validate "Existing Role" --feature-access "activity=full"
+EOT
+    end
+    optparse.parse!(args)
+    
+    # allow 0-1 arguments
+    verify_args!(args:args, optparse:optparse, max:1)
+    
+    connect(options)
+    begin
+      account = find_account_from_options(options)
+      account_id = account ? account['id'] : nil
+
+      # load existing role if arg passed
+      role = nil
+      if args[0]
+        role = find_role_by_name_or_id(account_id, args[0])
+        exit 1 if role.nil?
+      end
+
+      passed_options = options[:options] ? options[:options].reject {|k,v| k.is_a?(Symbol) } : {}
+      payload = nil
+      
+      if options[:payload]
+        payload = options[:payload]
+        payload.deep_merge!({'role' => passed_options}) unless passed_options.empty?
+      else
+        # merge -O options into normally parsed options
+        params.deep_merge!(passed_options)
+        
+        # Parse role access options
+        parse_role_access_options(options, params)
+
+        # Validate role type constraints
+        role_type = role ? role['roleType'] : params['roleType']
+        if role_type
+          if params['globalZoneAccess'] && role_type == 'user'
+            raise_command_error "The --default-cloud-access option is only available for account roles, not user roles"
+          end
+          if params['globalSiteAccess'] && role_type == 'account'
+            raise_command_error "The --default-group-access option is only available for user roles, not account roles"
+          end
+        end
+
+        if params.empty? && passed_options.empty? && role.nil?
+          raise_command_error "Specify at least one role configuration option to validate.\n#{optparse}"
+        end
+        
+        payload = {"role" => params}
+      end
+      
+      if role
+        payload['role']['id'] = role['id']
+      end
+      
+      query_params = parse_query_options(options)
+      @roles_interface.setopts(options)
+      
+      if options[:dry_run]
+        print_dry_run @roles_interface.dry.validate(account_id, payload, query_params)
+        return 0, nil
+      end
+      
+      json_response = @roles_interface.validate(account_id, payload, query_params)
+      
+      render_response(json_response, options) do
+        if json_response['success'] && json_response['valid']
+          print_green_success json_response['msg'] || "Role permissions are valid"
+        else
+          print_red_alert "Validation failed: #{json_response['msg'] || 'Invalid role permissions'}"
+          if json_response['errors'] && !json_response['errors'].empty?
+            print_h2 "Validation Errors", options
+            json_response['errors'].each do |key, msg|
+              print red, "  #{key}: #{msg}", reset, "\n"
+            end
+          end
+        end
+      end
+      
+      # Return exit code based on validation result
+      return json_response['success'] && json_response['valid'] ? 0 : 1
+      
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      return 1
     end
   end
 
@@ -978,6 +1112,10 @@ EOT
       account_id = account ? account['id'] : nil
       role = find_role_by_name_or_id(account_id, name)
       exit 1 if role.nil?
+
+      if role['roleType'] == 'account'
+        raise_command_error "The default-group-access command is only available for user roles, not account roles"
+      end
 
       params = {permissionCode: 'ComputeSite', access: access_value}
       @roles_interface.setopts(options)
@@ -1131,6 +1269,10 @@ EOT
       account_id = account ? account['id'] : nil
       role = find_role_by_name_or_id(account_id, name)
       exit 1 if role.nil?
+
+      if role['roleType'] == 'user'
+        raise_command_error "The default-cloud-access command is only available for account roles, not user roles"
+      end
 
       params = {permissionCode: 'ComputeZone', access: access_value}
       @roles_interface.setopts(options)
@@ -2475,6 +2617,153 @@ Update default workflow access for a role.
     end
   end
 
+  def update_default_cluster_type_access(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[role] [access]")
+      build_common_options(opts, options, [:json, :dry_run, :remote])
+      opts.footer = <<-EOT
+Update default cluster type access for a role.
+[role] is required. This is the id of a role.
+[access] is required. This is the access level to assign: full or none.
+      EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count: 2)
+    name = args[0]
+    access_value = args[1].to_s.downcase
+    if !['full', 'none', 'custom'].include?(access_value)
+      raise_command_error("invalid access value: #{args[1]}", args, optparse)
+    end
+
+    connect(options)
+    begin
+      account = find_account_from_options(options)
+      account_id = account ? account['id'] : nil
+      role = find_role_by_name_or_id(account_id, name)
+      exit 1 if role.nil?
+      params = {permissionCode: 'ServerGroupType', access: access_value}
+      @roles_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @roles_interface.dry.update_permission(account_id, role['id'], params)
+        return
+      end
+      json_response = @roles_interface.update_permission(account_id, role['id'], params)
+
+      if options[:json]
+        print JSON.pretty_generate(json_response)
+        print "\n"
+      else
+        print_green_success "Role #{role['authority']} default cluster type access updated"
+      end
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def update_cluster_type_access(args)
+    options = {}
+    cluster_type_id = nil
+    access_value = nil
+    do_all = false
+    allowed_access_values = ['full', 'none', 'default']
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[role] [cluster-type] [access]")
+      opts.on( '--cluster-type ID', String, "Cluster Type ID, code or Name" ) do |val|
+        cluster_type_id = val
+      end
+      opts.on( nil, '--all', "Update all cluster types at once." ) do
+        do_all = true
+      end
+      opts.on( '--access VALUE', String, "Access value [#{allowed_access_values.join('|')}]" ) do |val|
+        access_value = val
+      end
+      build_common_options(opts, options, [:json, :dry_run, :remote])
+      opts.footer = "Update role access for a cluster type or all cluster types.\n" +
+        "[role] is required. This is the name or id of a role.\n" +
+        "--cluster-type or --all is required. This is the name, code or id of a cluster type.\n" +
+        "--access is required. This is the new access value: #{ored_list(allowed_access_values)}"
+    end
+    optparse.parse!(args)
+
+    name = args[0]
+    if do_all
+      verify_args!(args:args, optparse:optparse, min:1, max:2)
+      access_value = args[1] if args[1]
+    else
+      verify_args!(args:args, optparse:optparse, min:1, max:3)
+      cluster_type_id = args[1] if args[1]
+      access_value = args[2] if args[2]
+    end
+    if !cluster_type_id && !do_all
+      raise_command_error("missing required argument: [cluster-type] or --all", args, optparse)
+    end
+    if !access_value
+      raise_command_error("missing required argument: [access]", args, optparse)
+    end
+    access_value = access_value.to_s.downcase
+    if !allowed_access_values.include?(access_value)
+      raise_command_error("invalid access value: #{access_value}", args, optparse)
+      puts optparse
+      return 1
+    end
+
+    connect(options)
+    begin
+      account = find_account_from_options(options)
+      account_id = account ? account['id'] : nil
+      role = find_role_by_name_or_id(account_id, name)
+      return 1 if role.nil?
+
+      role_json = @roles_interface.get(account_id, role['id'], {'includeDefaultAccess' => true})
+      cluster_type_permissions = role_json['clusterTypePermissions'] || role_json['clusterTypes'] || []
+
+      # hacky, but support name or code lookup via the list returned in the show payload
+      cluster_type = nil
+      if !do_all
+        if cluster_type_id.to_s =~ /\A\d{1,}\Z/
+          cluster_type = cluster_type_permissions.find {|b| b['id'] == cluster_type_id.to_i }
+        else
+          cluster_type = cluster_type_permissions.find {|b| b['name'] == cluster_type_id }
+        end
+        if cluster_type.nil?
+          print_red_alert "Cluster Type not found: '#{cluster_type_id}'"
+          return 1
+        end
+      end
+
+      params = {}
+      if do_all
+        params['allClusterTypes'] = true
+      else
+        params['clusterTypeId'] = cluster_type['id']
+      end
+      params['access'] = access_value == 'default' ? nil : access_value
+      @roles_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @roles_interface.dry.update_cluster_type(account_id, role['id'], params)
+        return
+      end
+      json_response = @roles_interface.update_cluster_type(account_id, role['id'], params)
+
+      if options[:json]
+        print JSON.pretty_generate(json_response)
+        print "\n"
+      else
+        if do_all
+          print_green_success "Role #{role['authority']} access updated for all cluster types"
+        else
+          print_green_success "Role #{role['authority']} access updated for cluster type #{cluster_type['name']}"
+        end
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
   private
   
   def add_role_option_types
@@ -2511,21 +2800,10 @@ Update default workflow access for a role.
   end
 
   def base_role_options(role_payload)
-    params = {"tenantId" => role_payload['owner'], "userId" => current_user['id'], "roleType" => role_payload['roleType'] }
+    params = {"tenantId" => role_payload['owner'], "roleType" => role_payload['roleType'] }
     @options_interface.options_for_source("copyFromRole", params)['data']
   end
 
-  def has_complete_access
-    has_access = false
-    if @is_master_account
-      admin_accounts = @user_permissions.select { |it| it['code'] == 'admin-accounts' && it['access'] == 'full'}
-      admin_roles = @user_permissions.select { |it| it['code'] == 'admin-roles' && it['access'] == 'full' }
-      if admin_accounts != nil && admin_roles != nil
-        has_access = true
-      end
-    end
-    has_access 
-  end
 
   def parse_access_csv(output, val)
     output ||= {}
@@ -2663,6 +2941,13 @@ Update default workflow access for a role.
     opts.on('--workflows ID=ACCESS', String, "Set workflow to a custom access by workflow id. Example: 1=none,2=full" ) do |val|
       options[:workflow_permissions] ||= {}
       parse_access_csv(options[:workflow_permissions], val)
+    end
+    opts.on('--default-cluster-type-access ACCESS', String, "Set the default cluster type access: [none|full]" ) do  |val|
+      params['globalTaskSetAccess'] = val.to_s.downcase
+    end
+    opts.on('--cluster-types CODE=ACCESS', String, "Set cluster type to a custom access by cluster type code. Example: kubernetes-cluster=none,mvm-cluster=full" ) do |val|
+      options[:cluster_type_permissions] ||= {}
+      parse_access_csv(options[:cluster_type_permissions], val)
     end
     opts.on('--reset-permissions', "Reset all feature permission access to none. This can be used in conjunction with --permissions to recreate the feature permission access for the role." ) do
       options[:reset_permissions] = true
@@ -2813,6 +3098,19 @@ Update default workflow access for a role.
         end
       end
       params['taskSets'] = perms_array
+    end
+    if options[:cluster_type_permissions]
+      perms_array = []
+      options[:cluster_type_permissions].each do |k,v|
+        cluster_type_code = k
+        access_value = v.to_s.empty? ? "none" : v.to_s
+        if cluster_type_code =~ /\A\d{1,}\Z/
+          perms_array << {"id" => cluster_type_code.to_i, "access" => access_value}
+        else
+          perms_array << {"code" => cluster_type_code, "access" => access_value}
+        end
+      end
+      params['clusterTypes'] = perms_array
     end
     if options[:reset_permissions]
       params["resetPermissions"] = true

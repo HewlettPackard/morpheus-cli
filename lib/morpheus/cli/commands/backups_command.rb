@@ -528,6 +528,8 @@ EOT
     {
       "ID" => 'id',
       "Name" => 'name',
+      "Type" => lambda {|it| format_backup_type_tag(it) },
+      "Location" => lambda {|it| format_backup_location_tag(it) },
       "Schedule" => lambda {|it| it['schedule']['name'] rescue '' },
       "Backup Job" => lambda {|it| it['job']['name'] rescue '' },
       "Created" => lambda {|it| format_local_dt(it['dateCreated']) },
@@ -539,6 +541,8 @@ EOT
     {
       "ID" => 'id',
       "Name" => 'name',
+      "Backup Type" => lambda {|it| format_backup_type_tag(it) },
+      "Backup Location" => lambda {|it| format_backup_location_tag(it) },
       "Location Type" => lambda {|it| 
         if it['locationType'] == "instance"
           "Instance"
@@ -587,6 +591,33 @@ EOT
 
   def format_backup_result_option_name(result)
     "#{result['backup']['name']} (#{format_local_dt(result['startDate'])})"
+  end
+
+  # format backup type tag (manual or policy-based)
+  def format_backup_type_tag(backup)
+    # check if backup has a schdule or job associated with it
+    # manual backups typically dont have a schedule while policy-based do
+    if backup['cronExpression'] || (backup['schedule'] && backup['schedule']['id'])
+      "#{cyan}POLICY#{reset}"
+    elsif backup['job'] && backup['job']['id']
+      "#{cyan}POLICY#{reset}"
+    else
+      "#{yellow}MANUAL#{reset}"
+    end
+  end
+
+  # format backup location tag (local or remote)
+  def format_backup_location_tag(backup)
+    # check storage provider or backup provider indicating remote storage
+    if backup['storageProvider'] && backup['storageProvider']['id']
+      provider_type = backup['storageProvider']['type'] || backup['storageProvider']['providerType'] || ''
+      "#{green}REMOTE#{reset} (#{provider_type})"
+    elsif backup['backupProvider'] && backup['backupProvider']['id']
+      provider_type = backup['backupProvider']['type'] || backup['backupProvider']['providerType'] || ''
+      "#{green}REMOTE#{reset} (#{provider_type})"
+    else
+      "#{blue}LOCAL#{reset}"
+    end
   end
 
   # prompt for an instance config (vdiPool.instanceConfig)
