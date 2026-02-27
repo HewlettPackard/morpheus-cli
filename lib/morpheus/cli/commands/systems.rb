@@ -8,8 +8,6 @@ class Morpheus::Cli::Systems
   set_command_description "View and manage systems."
   register_subcommands :list, :get, :add, :update, :remove
 
-  set_command_hidden
-  
   protected
 
   # Systems API uses lowercase keys in payloads.
