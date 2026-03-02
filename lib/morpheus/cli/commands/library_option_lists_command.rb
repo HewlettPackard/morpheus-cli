@@ -172,9 +172,7 @@ class Morpheus::Cli::LibraryOptionListsCommand
           "Username" => 'serviceUsername',
           "Password" => 'servicePassword',
           "Inject System Auth Header" => lambda {|it| format_boolean it['injectExecutionLeaseAuth'] },
-          "Use Owner Authorization"   => lambda {|it| format_boolean it['useOwnerAuth'] },
-          "Inject System Auth Header" => lambda {|it| format_boolean it['injectExecutionLeaseAuth'] },
-          "Use Owner Authorization" => lambda {|it| format_boolean it['useOwnerAuth'] },
+          "Use Owner Authorization"   => lambda {|it| format_boolean it['useOwnerAuth'] }
         }
         option_list_columns.delete("API Type") if option_type_list['type'] != 'api'
         option_list_columns.delete("Credentials") if !['rest','ldap'].include?(option_type_list['type']) # || !(option_type_list['credential'] && option_type_list['credential']['id'])
