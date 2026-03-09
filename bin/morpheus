@@ -2,11 +2,14 @@
 require 'morpheus'
 
 # arguments
-args = ARGV
+args = ARGV.dup
 
-# input pipe
-# append piped data as arguments
-if !$stdin.tty?
+# input pipe: only read stdin as arguments when --stdin is explicitly passed.
+# Previously stdin was always consumed when not a TTY, which caused morpheus
+# invoked inside a piped bash script (e.g. base64 -d <<< <script> | bash -l)
+# to consume the remaining script lines as CLI arguments (MORPH-6237).
+# Usage: echo 42 | morpheus instances get --stdin
+if args.delete('--stdin') && !$stdin.tty?
   pipe_data = $stdin.read
   if pipe_data
     args += pipe_data.split

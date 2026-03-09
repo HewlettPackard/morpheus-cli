@@ -48,7 +48,7 @@ class Morpheus::Cli::Roles
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[search phrase]")
       opts.on( '--tenant TENANT', "Tenant Filter for list of Roles." ) do |val|
-        options[:tenant] = val
+        options[:account] = val
       end
       build_standard_list_options(opts, options)
       opts.footer = "List roles."
@@ -68,9 +68,6 @@ class Morpheus::Cli::Roles
       return 0, nil
     end
     load_whoami()
-    if options[:tenant]
-      params[:tenant] = options[:tenant]
-    end
     json_response = @roles_interface.list(account_id, params)
 
     render_response(json_response, options, "roles") do
@@ -147,9 +144,7 @@ class Morpheus::Cli::Roles
         options[:include_default_access] = true
       end
       opts.on('--account-id ID', String, "Clarify Owner of Role") do |val|
-        if has_complete_access
-          options[:account_id] = val.to_s
-        end
+        options[:account_id] = val.to_s
       end
       build_standard_get_options(opts, options)
       opts.footer = <<-EOT
@@ -611,7 +606,7 @@ EOT
       opts.banner = subcommand_usage("[name] [options]")
       build_option_type_options(opts, options, add_role_option_types)
       build_role_access_options(opts, options, params)
-      opts.on('--owner ID', String, "Set the owner/tenant/account for the role by account id. Only master tenants with full permission for Tenant and Role may use this option." ) do |val|
+      opts.on('--owner ID', String, "Set the owner/tenant/account for the role by account id. This option requires the admin permission to manage tenants." ) do |val|
         params['owner'] = val
       end
       opts.on(nil, '--include-default-access', "Include default access levels in the response (returns all available resources)") do
@@ -657,24 +652,19 @@ EOT
         params['authority'] = v_prompt['authority']
         v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'description', 'fieldLabel' => 'Description', 'type' => 'text', 'displayOrder' => 2}], options[:options])
         params['description'] = v_prompt['description']
-        v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'landingUrl', 'fieldLabel' => 'landingUrl', 'type' => 'text', 'displayOrder' => 3, 'description' => 'An optional override for the default landing page after login for a user.'}], options[:options])
+        v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'landingUrl', 'fieldLabel' => 'Landing URL', 'type' => 'text', 'displayOrder' => 3, 'description' => 'An optional override for the default landing page after login for a user.'}], options[:options])
         params['landingUrl'] = v_prompt['landingUrl']
 
-        if params['owner']
-          if @is_master_account && has_complete_access
-            params['owner'] = params['owner']
-          else
-            print_red_alert "You do not have the necessary authority to use owner option"
-            return
-          end
-        elsif @is_master_account && has_complete_access
+        can_manage_accounts = @user_permissions.find { |it| it['code'] == 'admin-accounts' && it['access'] == 'full'}
+
+        if can_manage_accounts
           v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'owner', 'fieldLabel' => 'Owner', 'type' => 'select', 'selectOptions' => role_owner_options, 'defaultValue' => current_account['id'], 'displayOrder' => 3}], options[:options])
           params['owner'] = v_prompt['owner']
         else
           params['owner'] = current_account['id']
         end  
 
-        if @is_master_account && params['owner'] == current_account['id']
+        if can_manage_accounts
           v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'roleType', 'fieldLabel' => 'Type', 'type' => 'select', 'selectOptions' => role_type_options, 'defaultValue' => 'user', 'displayOrder' => 4}], options[:options])
           params['roleType'] = v_prompt['roleType']
         else
@@ -811,9 +801,9 @@ EOT
         # merge -O options into normally parsed options
         params.deep_merge!(passed_options)
         prompt_option_types = update_role_option_types()
-        if !@is_master_account
-          prompt_option_types = prompt_option_types.reject {|it| ['roleType', 'multitenant','multitenantLocked'].include?(it['fieldName']) }
-        end
+        # if !has_complete_access
+        #   prompt_option_types = prompt_option_types.reject {|it| ['roleType', 'multitenant','multitenantLocked'].include?(it['fieldName']) }
+        # end
         if role['roleType'] != 'user'
           prompt_option_types = prompt_option_types.reject {|it| ['multitenant','multitenantLocked'].include?(it['fieldName']) }
         end
@@ -2807,21 +2797,10 @@ Update default cluster type access for a role.
   end
 
   def base_role_options(role_payload)
-    params = {"tenantId" => role_payload['owner'], "userId" => current_user['id'], "roleType" => role_payload['roleType'] }
+    params = {"tenantId" => role_payload['owner'], "roleType" => role_payload['roleType'] }
     @options_interface.options_for_source("copyFromRole", params)['data']
   end
 
-  def has_complete_access
-    has_access = false
-    if @is_master_account
-      admin_accounts = @user_permissions.select { |it| it['code'] == 'admin-accounts' && it['access'] == 'full'}
-      admin_roles = @user_permissions.select { |it| it['code'] == 'admin-roles' && it['access'] == 'full' }
-      if admin_accounts != nil && admin_roles != nil
-        has_access = true
-      end
-    end
-    has_access 
-  end
 
   def parse_access_csv(output, val)
     output ||= {}
