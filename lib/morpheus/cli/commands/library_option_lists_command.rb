@@ -171,11 +171,17 @@ class Morpheus::Cli::LibraryOptionListsCommand
           "Credentials" => lambda {|it| it['credential'] ? (it['credential']['type'] == 'local' ? '(Local)' : it['credential']['name']) : nil },
           "Username" => 'serviceUsername',
           "Password" => 'servicePassword',
+          "Inject System Auth Header" => lambda {|it| format_boolean it['injectExecutionLeaseAuth'] },
+          "Use Owner Authorization"   => lambda {|it| format_boolean it['useOwnerAuth'] }
         }
         option_list_columns.delete("API Type") if option_type_list['type'] != 'api'
         option_list_columns.delete("Credentials") if !['rest','ldap'].include?(option_type_list['type']) # || !(option_type_list['credential'] && option_type_list['credential']['id'])
         option_list_columns.delete("Username") if !['rest','ldap'].include?(option_type_list['type']) || !(option_type_list['serviceUsername'])
         option_list_columns.delete("Password") if !['rest','ldap'].include?(option_type_list['type']) || !(option_type_list['servicePassword'])
+        option_list_columns.delete("Inject System Auth Header") if option_type_list['type'] != 'rest'
+        option_list_columns.delete("Use Owner Authorization")   if option_type_list['type'] != 'rest'
+        option_list_columns.delete("Inject System Auth Header") if option_type_list['type'] != 'rest'
+        option_list_columns.delete("Use Owner Authorization") if option_type_list['type'] != 'rest'
         source_headers = []
         if option_type_list['config'] && option_type_list['config']['sourceHeaders']
           source_headers = option_type_list['config']['sourceHeaders'].collect do |header|
@@ -291,7 +297,7 @@ class Morpheus::Cli::LibraryOptionListsCommand
           end
         end
         # tweak payload for API
-        ['ignoreSSLErrors', 'realTime'].each { |k|
+        ['ignoreSSLErrors', 'realTime', 'injectExecutionLeaseAuth', 'useOwnerAuth'].each { |k|
           list_payload[k] = ['on','true'].include?(list_payload[k].to_s) if list_payload.key?(k)
         }
         payload.deep_merge!({'optionTypeList' => list_payload})
@@ -348,7 +354,7 @@ class Morpheus::Cli::LibraryOptionListsCommand
           end
         end
         # tweak payload for API
-        ['ignoreSSLErrors', 'realTime'].each { |k|
+        ['ignoreSSLErrors', 'realTime', 'injectExecutionLeaseAuth', 'useOwnerAuth'].each { |k|
           list_payload[k] = ['on','true'].include?(list_payload[k].to_s) if list_payload.key?(k)
         }
         payload.deep_merge!({'optionTypeList' => list_payload})
@@ -437,6 +443,8 @@ class Morpheus::Cli::LibraryOptionListsCommand
         {'dependsOnCode' => 'optionTypeList.type:rest', 'fieldName' => 'sourceUrl', 'fieldLabel' => 'Source Url', 'type' => 'text', 'required' => true, 'description' => "A REST URL can be used to fetch list data and is cached in the appliance database.", 'displayOrder' => 6},
         {'dependsOnCode' => 'optionTypeList.type:rest', 'fieldName' => 'ignoreSSLErrors', 'fieldLabel' => 'Ignore SSL Errors', 'type' => 'checkbox', 'defaultValue' => false, 'displayOrder' => 7},
         {'dependsOnCode' => 'optionTypeList.type:rest', 'fieldName' => 'realTime', 'fieldLabel' => 'Real Time', 'type' => 'checkbox', 'defaultValue' => false, 'displayOrder' => 8},
+        {'dependsOnCode' => 'optionTypeList.type:rest', 'fieldName' => 'injectExecutionLeaseAuth', 'switch' => 'inject-execution-lease-auth', 'fieldLabel' => 'Inject System Auth Header', 'type' => 'checkbox', 'defaultValue' => false, 'description' => 'Injects an authorization header using a system lease token when making the REST call.', 'displayOrder' => 21},
+        {'dependsOnCode' => 'optionTypeList.type:rest', 'fieldName' => 'useOwnerAuth', 'switch' => 'use-owner-auth', 'fieldLabel' => 'Use Owner Authorization', 'type' => 'checkbox', 'defaultValue' => false, 'description' => 'Uses the authorization credentials of the owner of the option list.', 'displayOrder' => 22},
         {'dependsOnCode' => 'optionTypeList.type:rest', 'fieldName' => 'sourceMethod', 'fieldLabel' => 'Source Method', 'type' => 'select', 'selectOptions' => [{'name' => 'GET', 'value' => 'GET'}, {'name' => 'POST', 'value' => 'POST'}], 'defaultValue' => 'GET', 'required' => true, 'displayOrder' => 9},
         {'dependsOnCode' => 'optionTypeList.type:rest|ldap', 'fieldName' => 'credential', 'fieldLabel' => 'Credentials', 'type' => 'select', 'optionSource' => 'credentials', 'description' => 'Credential ID or use "local" to specify username and password', 'displayOrder' => 10, 'defaultValue' => "local", 'required' => true, :for_help_only => true}, # hacky way to render this but not prompt for it
         {'dependsOnCode' => 'optionTypeList.type:rest', 'fieldName' => 'serviceUsername', 'fieldLabel' => 'Username', 'type' => 'text', 'description' => "A Basic Auth Username for use when type is 'rest'.", 'displayOrder' => 11, "credentialFieldContext" => 'credential', "credentialFieldName" => 'username', "credentialType" => "username-password,oauth2"},

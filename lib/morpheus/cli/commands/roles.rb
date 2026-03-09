@@ -48,7 +48,7 @@ class Morpheus::Cli::Roles
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[search phrase]")
       opts.on( '--tenant TENANT', "Tenant Filter for list of Roles." ) do |val|
-        options[:tenant] = val
+        options[:account] = val
       end
       build_standard_list_options(opts, options)
       opts.footer = "List roles."
@@ -68,9 +68,6 @@ class Morpheus::Cli::Roles
       return 0, nil
     end
     load_whoami()
-    if options[:tenant]
-      params[:tenant] = options[:tenant]
-    end
     json_response = @roles_interface.list(account_id, params)
 
     render_response(json_response, options, "roles") do
