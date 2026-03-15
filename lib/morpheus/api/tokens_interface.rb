@@ -15,13 +15,13 @@ class Morpheus::TokensInterface < Morpheus::APIClient
     execute(method: :get, url: "#{base_path}/#{id}", params: params, headers: headers)
   end
 
-  def create(payload)
-    execute(method: :post, url: "#{base_path}", payload: payload)
+  def create(payload, params={})
+    execute(method: :post, url: "#{base_path}", payload: payload, params: params)
   end
 
-  def update(id, payload)
-    execute(method: :put, url: "#{base_path}/#{id}", params: params, headers: headers)
-  end
+  # def update(id, payload, params={})
+  #   execute(method: :put, url: "#{base_path}/#{id}", params: params, headers: headers)
+  # end
 
   def destroy(id, params={})
     validate_id!(id)
