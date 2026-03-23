@@ -69,8 +69,8 @@ class Morpheus::Cli::TokensCommand
       if tokens.empty?
         print yellow,"No tokens found.",reset,"\n"
       else
-        #columns = token_columns.select {|k,v| ["ID", "Name", "Client ID", "Username", "Access Token", "TTL"].include?(k) }.upcase_keys!
-        columns = token_columns.upcase_keys!
+        columns = token_columns.select {|k,v| ["ID", "Name", "Client ID", "Username", "Access Token", "Expiration", "TTL", "Date Created"].include?(k) }.upcase_keys!
+        #columns = token_columns.upcase_keys!
         print as_pretty_table(tokens, columns, options)
         print_results_pagination(json_response)
       end
@@ -303,8 +303,9 @@ EOT
       "Client ID" => lambda {|it| it['clientId'] },
       "Username" => lambda {|it| it['username'] },
       "Access Token" => lambda {|it| it['maskedAccessToken'] },
-      "Refresh Token" => lambda {|it| it['maskedRefreshToken'] },
+      #"Refresh Token" => lambda {|it| it['maskedRefreshToken'] },
       "Scope" => lambda {|it| it['scope'] },
+      "Expiration" => lambda {|it| format_local_dt(it['expiration']) },
       "TTL" => lambda {|it| 
         if it['expiration']
           expires_on = parse_time(it['expiration'])
@@ -315,7 +316,7 @@ EOT
           end
         end
       },
-      "Expiration" => lambda {|it| format_local_dt(it['expiration']) },
+      # "Date Created" => lambda {|it| format_local_dt(it['dateCreated']) },
     }
   end
 
