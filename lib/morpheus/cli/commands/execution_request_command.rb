@@ -83,13 +83,13 @@ class Morpheus::Cli::ExecutionRequestCommand
         if options[:refresh_interval].nil? || options[:refresh_interval].to_f < 0
           options[:refresh_interval] = default_refresh_interval
         end
-        if !(execution_request['status'] == 'pending' || execution_request['status'] == 'new')
+        if is_finished(execution_request)
           # it is finished
         else
           print cyan
           refresh_display_seconds = options[:refresh_interval] % 1.0 == 0 ? options[:refresh_interval].to_i : options[:refresh_interval]
           print "Execution request has not yet finished. Refreshing every #{refresh_display_seconds} seconds"
-          while execution_request['status'] == 'pending' || execution_request['status'] == 'new' do
+          while !is_finished(execution_request) do
             sleep(options[:refresh_interval])
             print cyan,".",reset
             json_response = @execution_request_interface.get(execution_request_id, params)
@@ -324,6 +324,10 @@ class Morpheus::Cli::ExecutionRequestCommand
       out << "#{cyan}#{status_str.upcase}#{return_color}"
     end
     out
+  end
+
+  def is_finished(execution_request)
+    ['executing', 'pending', 'new'].include?(execution_request['status']) ? false : true
   end
 
 end
