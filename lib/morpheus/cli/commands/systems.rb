@@ -6,7 +6,7 @@ class Morpheus::Cli::Systems
 
   set_command_name :systems
   set_command_description "View and manage systems."
-  register_subcommands :list, :get, :add, :update, :remove, :'add-uninitialized'
+  register_subcommands :list, :get, :add, :update, :remove, :'add-uninitialized', {:'initialize' => 'exec_initialize'}
 
   protected
 
@@ -346,6 +346,65 @@ EOT
       system_id = json_response['id'] || json_response.dig(rest_object_key, 'id')
       print_green_success "Uninitialized system created"
       get([system_id.to_s] + (options[:remote] ? ['-r', options[:remote]] : [])) if system_id
+    end
+  end
+
+  def exec_initialize(args)
+    options = {}
+    params = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system]")
+      opts.on('--name NAME', String, "Update the system name before initializing") do |val|
+        params['name'] = val.to_s
+      end
+      opts.on('--description [TEXT]', String, "Update the description before initializing") do |val|
+        params['description'] = val.to_s
+      end
+      opts.on('--externalId ID', String, "Set the external ID before initializing") do |val|
+        params['externalId'] = val.to_s
+      end
+      opts.on('--config JSON', String, "Set config JSON before initializing") do |val|
+        params['config'] = JSON.parse(val)
+      end
+      build_standard_update_options(opts, options)
+      opts.footer = <<-EOT
+Initialize an existing system that is in an uninitialized state.
+This invokes the provider's prepare and initialize lifecycle methods.
+[system] is required. This is the name or id of a system.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args: args, optparse: optparse, count: 1)
+    connect(options)
+
+    system = nil
+    if args[0].to_s =~ /\A\d{1,}\Z/
+      json_response = rest_interface.get(args[0].to_i)
+      system = json_response[rest_object_key] || json_response
+    else
+      system = find_by_name(rest_key, args[0])
+    end
+    return 1, "System not found for '#{args[0]}'" if system.nil?
+
+    payload = {}
+    if options[:payload]
+      payload = options[:payload]
+      payload[rest_object_key] ||= {}
+      payload[rest_object_key].deep_merge!(params) unless params.empty?
+    else
+      payload = {rest_object_key => params}
+    end
+
+    if options[:dry_run]
+      print_dry_run rest_interface.dry.initialize_system(system['id'], payload)
+      return
+    end
+
+    rest_interface.setopts(options)
+    json_response = rest_interface.initialize_system(system['id'], payload)
+    render_response(json_response, options, rest_object_key) do
+      print_green_success "System #{system['name']} initialized"
+      get([system['id'].to_s] + (options[:remote] ? ['-r', options[:remote]] : []))
     end
   end
 
