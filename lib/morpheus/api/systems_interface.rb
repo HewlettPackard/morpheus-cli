@@ -15,4 +15,9 @@ class Morpheus::SystemsInterface < Morpheus::RestInterface
     execute(method: :put, url: "#{base_path}/#{CGI::escape(id.to_s)}/initialize", params: params, payload: payload, headers: headers)
   end
 
+  def validate_system(id, params={}, headers={})
+    validate_id!(id)
+    execute(method: :get, url: "#{base_path}/#{CGI::escape(id.to_s)}/validate", params: params, headers: headers)
+  end
+
 end
