@@ -352,6 +352,7 @@ EOT
   def exec_initialize(args)
     options = {}
     params = {}
+    components = []
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[system]")
       opts.on('--name NAME', String, "Update the system name before initializing") do |val|
@@ -366,6 +367,12 @@ EOT
       opts.on('--config JSON', String, "Set config JSON before initializing") do |val|
         params['config'] = JSON.parse(val)
       end
+      opts.on('--component JSON', String, "Component update JSON (can be repeated). e.g. '{\"typeCode\":\"compute-node\",\"externalId\":\"ext-001\",\"config\":{\"ip\":\"10.0.0.1\"}}'") do |val|
+        components << JSON.parse(val)
+      end
+      opts.on('--components JSON', String, "Component updates JSON array") do |val|
+        components.concat(JSON.parse(val))
+      end
       build_standard_update_options(opts, options)
       opts.footer = <<-EOT
 Initialize an existing system that is in an uninitialized state.
@@ -377,34 +384,71 @@ EOT
     verify_args!(args: args, optparse: optparse, count: 1)
     connect(options)
 
-    system = nil
+    system_record = nil
     if args[0].to_s =~ /\A\d{1,}\Z/
       json_response = rest_interface.get(args[0].to_i)
-      system = json_response[rest_object_key] || json_response
+      system_record = json_response[rest_object_key] || json_response
     else
-      system = find_by_name(rest_key, args[0])
+      system_record = find_by_name(rest_key, args[0])
     end
-    return 1, "System not found for '#{args[0]}'" if system.nil?
+    return 1, "System not found for '#{args[0]}'" if system_record.nil?
+
+    # Prompt for component updates if none provided via flags and not in no-prompt mode
+    if components.empty? && !options[:no_prompt] && !options[:payload]
+      existing_components = system_record['components'] || []
+      if existing_components.any?
+        print cyan, "\nExisting Components:\n", reset
+        existing_components.each_with_index do |c, idx|
+          type_code = c.dig('type', 'code') || 'unknown'
+          print "  #{idx + 1}) #{c['name']} (#{type_code})#{c['externalId'] ? " externalId=#{c['externalId']}" : ''}\n"
+        end
+        print "\n"
+        update_components = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'updateComponents', 'type' => 'text', 'fieldLabel' => 'Update any components? (yes/no)', 'required' => true, 'defaultValue' => 'no'}], options[:options], @api_client, {})['updateComponents']
+        if update_components.to_s.downcase =~ /^(y|yes)$/
+          existing_components.each do |c|
+            type_code = c.dig('type', 'code') || 'unknown'
+            print cyan, "\nComponent: #{c['name']} (#{type_code})\n", reset
+            comp_update = {'typeCode' => type_code}
+
+            ext_id = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'externalId', 'type' => 'text', 'fieldLabel' => "  External ID (current: #{c['externalId'] || 'none'})", 'required' => false}], options[:options], @api_client, {})['externalId']
+            comp_update['externalId'] = ext_id unless ext_id.to_s.empty?
+
+            comp_config = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'config', 'type' => 'text', 'fieldLabel' => '  Config JSON (optional)', 'required' => false}], options[:options], @api_client, {})['config']
+            if comp_config && !comp_config.to_s.empty?
+              begin
+                comp_update['config'] = JSON.parse(comp_config)
+              rescue JSON::ParserError => e
+                print_red_alert "Invalid JSON for component config: #{e.message}"
+              end
+            end
+
+            components << comp_update if comp_update.keys.length > 1
+          end
+        end
+      end
+    end
 
     payload = {}
     if options[:payload]
       payload = options[:payload]
       payload[rest_object_key] ||= {}
       payload[rest_object_key].deep_merge!(params) unless params.empty?
+      payload[rest_object_key]['components'] = components unless components.empty?
     else
+      params['components'] = components unless components.empty?
       payload = {rest_object_key => params}
     end
 
     if options[:dry_run]
-      print_dry_run rest_interface.dry.initialize_system(system['id'], payload)
+      print_dry_run rest_interface.dry.initialize_system(system_record['id'], payload)
       return
     end
 
     rest_interface.setopts(options)
-    json_response = rest_interface.initialize_system(system['id'], payload)
+    json_response = rest_interface.initialize_system(system_record['id'], payload)
     render_response(json_response, options, rest_object_key) do
-      print_green_success "System #{system['name']} initialized"
-      get([system['id'].to_s] + (options[:remote] ? ['-r', options[:remote]] : []))
+      print_green_success "System #{system_record['name']} initialized"
+      get([system_record['id'].to_s] + (options[:remote] ? ['-r', options[:remote]] : []))
     end
   end
 
