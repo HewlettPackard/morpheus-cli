@@ -5,7 +5,7 @@ class Morpheus::Cli::SupportBundlesCommand
 
   set_command_description "View and manage support bundles"
   set_command_name :'support-bundles'
-  register_subcommands :list, :get, :generate, :remove, :download
+  register_subcommands :list, :get, :generate, :remove, :cancel, :download
 
   def connect(opts)
     @api_client = establish_remote_appliance_connection(opts)
@@ -268,10 +268,14 @@ EOT
     params = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[id]")
+      opts.on('--force', "Force delete even if the bundle is active (PENDING, IN_PROGRESS, or CANCELLING).") do
+        params['force'] = true
+      end
       build_standard_remove_options(opts, options)
       opts.footer = <<-EOT
 Delete a support bundle.
 [id] is required. This is the id of the support bundle to delete.
+Active bundles are rejected unless --force is passed.
 EOT
     end
     optparse.parse!(args)
@@ -288,6 +292,35 @@ EOT
     json_response = @support_bundles_interface.destroy(bundle['id'], params)
     render_response(json_response, options) do
       print_green_success "Removed support bundle #{bundle['name']} (#{bundle['id']})"
+    end
+    return 0
+  end
+
+  def cancel(args)
+    options = {}
+    params = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[id]")
+      build_standard_update_options(opts, options, [:auto_confirm])
+      opts.footer = <<-EOT
+Cancel a support bundle.
+[id] is required. This is the id of the support bundle to cancel.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args: args, optparse: optparse, count: 1)
+    connect(options)
+    @support_bundles_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @support_bundles_interface.dry.cancel(args[0], {}, params)
+      return 0
+    end
+    bundle = find_support_bundle_by_id(args[0])
+    return 1 if bundle.nil?
+    confirm!("Are you sure you want to cancel support bundle #{bundle['name']} (#{bundle['id']})?", options)
+    json_response = @support_bundles_interface.cancel(bundle['id'], {}, params)
+    render_response(json_response, options) do
+      print_green_success "Support bundle #{bundle['id']} cancellation requested."
     end
     return 0
   end
@@ -435,7 +468,7 @@ EOT
     print cyan, "Refreshing every #{refresh_display_seconds} seconds until complete...", reset, "\n" unless options[:quiet]
     max_attempts = (default_refresh_timeout / options[:refresh_interval]).ceil
     attempt = 0
-    while ['pending', 'in_progress'].include?(bundle['status'].to_s.downcase) do
+    while ['pending', 'in_progress', 'cancelling'].include?(bundle['status'].to_s.downcase) do
       sleep(options[:refresh_interval])
       print cyan, ".", reset unless options[:quiet]
       bundle = @support_bundles_interface.get(bundle['id'])['supportBundle']
@@ -476,6 +509,10 @@ EOT
       out << "#{cyan}PENDING#{return_color}"
     when 'failed'
       out << "#{red}FAILED#{return_color}"
+    when 'cancelling'
+      out << "#{yellow}CANCELLING#{return_color}"
+    when 'cancelled'
+      out << "#{yellow}CANCELLED#{return_color}"
     else
       out << "#{yellow}#{bundle['status']}#{return_color}"
     end
