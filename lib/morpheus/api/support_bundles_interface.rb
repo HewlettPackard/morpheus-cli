@@ -39,4 +39,8 @@ class Morpheus::SupportBundlesInterface < Morpheus::RestInterface
     return http_response
   end
 
+  def cancel(id, payload={}, params={}, headers={})
+    execute(method: :post, url: "#{base_path}/#{CGI::escape(id.to_s)}/cancel", params: params, payload: payload, headers: headers)
+  end
+
 end
