@@ -651,9 +651,9 @@ class Morpheus::Cli::ImageBuilderCommand
   private
 
   def get_available_image_build_types()
-    # todo: api call
     [
-      {'name' => 'VMware', 'code' => 'vmware', 'instanceType' => {'code' => 'vmware'}}
+      {'name' => 'VMware', 'code' => 'vmware', 'instanceType' => {'code' => 'vmware'}},
+      {'name' => 'KVM', 'code' => 'kvm', 'instanceType' => {'code' => 'kvm'}}
     ]
   end
 
@@ -661,17 +661,6 @@ class Morpheus::Cli::ImageBuilderCommand
     get_available_image_build_types().collect {|it| 
       {'name' => it['name'], 'value' => it['code']}
     }
-  end
-
-  def find_image_build_type(val)
-    if val.nil? || val.to_s.empty?
-      return nil
-    else
-      return get_available_image_build_types().find { |it| 
-        (it['code'].to_s.downcase == val.to_s.downcase) || 
-        (it['name'].to_s.downcase == val.to_s.downcase)
-      }
-    end
   end
 
   def add_image_build_option_types(connected=true)
@@ -901,15 +890,28 @@ class Morpheus::Cli::ImageBuilderCommand
   def prompt_new_image_build(options={}, default_values={}, do_require=true)
     payload = {}
 
+    # load to create-options data for help with prompting
+    create_options = nil
+    begin
+      create_options = @image_builds_interface.create_options({})
+    rescue => ex
+      Morpheus::Logging::DarkPrinter.puts "Unable to load image build create options data" if Morpheus::Logging.debug?
+    end
     # Summary / Settings Tab
 
     # Image Build Type
+    image_build_types = nil
+    if create_options && create_options['imageBuildTypes']
+      image_build_types = create_options['imageBuildTypes'].collect {|it| it.merge({'value' => it['code']}) }
+    else
+      image_build_types = get_available_image_build_types_dropdown
+    end
     image_build_type = nil
     if options['type']
-      image_build_type = find_image_build_type(options['type'])
+      image_build_type = image_build_types.find { |it| (it['code'].to_s.downcase == options['type'].to_s.downcase) ||  (it['name'].to_s.downcase == options['type'].to_s.downcase) }
     else
-      v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'type', 'fieldLabel' => 'Type', 'type' => 'select', 'selectOptions' => get_available_image_build_types_dropdown(), 'required' => do_require, 'description' => 'Choose the type of image build.', 'defaultValue' => default_values['type'], :fmt=>:natural}], options, @api_client)
-      image_build_type = find_image_build_type(v_prompt['type'])
+      v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'type', 'fieldLabel' => 'Type', 'type' => 'select', 'selectOptions' => image_build_types, 'required' => do_require, 'description' => 'Choose the type of image build.', 'defaultValue' => default_values['type'], :fmt=>:natural}], options, @api_client)
+      image_build_type = Morpheus::Cli::OptionTypes.get_last_select()
     end
     if !image_build_type
       print_red_alert "Image Build Type not found!"
