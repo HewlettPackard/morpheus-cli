@@ -118,6 +118,12 @@ EOT
       opts.on('--storage-provider ID', String, "Storage bucket to write the bundle to.") do |val|
         options[:storage_provider_id] = val
       end
+      opts.on('--start-date DATE', String, "Start of the log collection window (required). Accepts ISO 8601 formats like '2026-01-15' or '2026-01-15T00:00:00Z'.") do |val|
+        options[:start_date] = val
+      end
+      opts.on('--end-date DATE', String, "End of the log collection window. Accepts formats like '2026-01-15' or '2026-01-15T23:59:59'. Defaults to now.") do |val|
+        options[:end_date] = val
+      end
       opts.on('--refresh [SECONDS]', String, "Poll until bundle generation is complete. Default interval is #{default_refresh_interval} seconds.") do |val|
         options[:refresh_until_finished] = true
         if !val.to_s.empty?
@@ -133,6 +139,8 @@ Without --all, you will be prompted to select contents from the list of
 available types, grouped by category.
 Pass --all to include every eligible content type automatically without
 being prompted.
+
+Use --start-date and --end-date to restrict the log collection window.
 EOT
     end
     optparse.parse!(args)
@@ -140,6 +148,12 @@ EOT
     connect(options)
     @support_bundles_interface.setopts(options)
     payload = parse_payload(options) || {}
+
+    # startDate is required — either via --start-date flag or payload
+    if options[:start_date].nil? && payload['startDate'].to_s.empty?
+      print_red_alert "--start-date is required"
+      return 1
+    end
 
     # Optional storage provider -- prompt unless supplied via flag
     if options[:storage_provider_id]
@@ -163,6 +177,23 @@ EOT
         storage_prompt = Morpheus::Cli::OptionTypes.prompt([storage_opt_type], options[:options], @api_client)
         payload['storageProviderId'] = storage_prompt['storageProviderId'].to_i if storage_prompt['storageProviderId'].to_s != ''
       end
+    end
+
+    if options[:start_date]
+      t = parse_time(options[:start_date])
+      if t.nil?
+        print_red_alert "Invalid --start-date value: #{options[:start_date]}"
+        return 1
+      end
+      payload['startDate'] = t.utc.iso8601
+    end
+    if options[:end_date]
+      t = parse_time(options[:end_date])
+      if t.nil?
+        print_red_alert "Invalid --end-date value: #{options[:end_date]}"
+        return 1
+      end
+      payload['endDate'] = t.utc.iso8601
     end
 
     if options[:all]
@@ -369,7 +400,7 @@ EOT
     return 1 if bundle.nil?
 
     bundle_status = bundle['status'].to_s.downcase
-    unless bundle_status == 'completed'
+    unless ['completed', 'warning'].include?(bundle_status)
       print_red_alert "Support bundle is not ready for download (status: #{bundle['status']})"
       return 1
     end
@@ -503,6 +534,8 @@ EOT
     case status_str
     when 'completed'
       out << "#{green}COMPLETED#{return_color}"
+    when 'warning'
+      out << "#{yellow}COMPLETED WITH WARNINGS#{return_color}"
     when 'in_progress'
       out << "#{cyan}IN PROGRESS#{return_color}"
     when 'pending'
