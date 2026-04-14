@@ -210,56 +210,62 @@ EOT
 
       all_content_options_by_value = all_content_options.each_with_object({}) { |it, h| h[it['value'].to_s] = it }
 
-      contents_opt_type = {
-        'fieldName'     => 'contents',
-        'fieldLabel'    => 'Contents',
-        'type'          => 'multiSelect',
-        'required'      => true,
-        'description'   => 'Select content types to include in the bundle.',
-        'selectOptions' => all_content_options.map { |it| {'name' => it['label'] || it['name'], 'value' => it['value']} },
-      }
-      content_prompt = Morpheus::Cli::OptionTypes.prompt([contents_opt_type], options[:options], @api_client)
-      chosen_values = content_prompt['contents']
-      chosen_values = chosen_values.is_a?(Array) ? chosen_values : chosen_values.to_s.split(',').map(&:strip)
-      chosen_values = chosen_values.reject { |v| v.to_s.strip.empty? }.uniq
-
-      if chosen_values.empty?
-        print yellow, "No content types selected.", reset, "\n"
-        return 1
-      end
-
       payload_contents = []
-      chosen_values.each do |val|
-        item = all_content_options_by_value[val.to_s]
-        code = item ? item['code'].to_s : val.to_s
+      added_values = []
+      add_another_content = true
+      while add_another_content do
+        remaining_options = all_content_options.reject { |it| added_values.include?(it['value'].to_s) }
+        break if remaining_options.empty?
+
+        content_opt_type = {
+          'fieldName'     => 'content',
+          'fieldLabel'    => 'Contents',
+          'type'          => 'select',
+          'required'      => true,
+          'description'   => 'Select a content type to include in the bundle.',
+          'selectOptions' => remaining_options.map { |it| {'name' => it['label'] || it['name'], 'value' => it['value']} },
+        }
+        content_result = Morpheus::Cli::OptionTypes.prompt([content_opt_type], options[:options], @api_client)
+        val = content_result['content'].to_s.strip
+        break if val.empty?
+
+        item = all_content_options_by_value[val]
+        code = item ? item['code'].to_s : val
 
         if item && item['isResourceBacked']
           # Fetch available resource instances for this content type
           resources = @api_client.options.options_for_source('supportBundles/contentTypeResources', {contentTypeCode: code})['data'] || []
           if resources.empty?
             print yellow, "No resources found for content type '#{item['label'] || code}', skipping.", reset, "\n"
-            next
-          end
-          # Deduplicate by resourceId in case multiple content type entries map to same resource
-          resources = resources.uniq { |r| r['resourceId'] }
-          resource_opt_type = {
-            'fieldName'     => "resources_#{code}",
-            'fieldLabel'    => "#{item['label'] || code} Resources",
-            'type'          => 'multiSelect',
-            'required'      => true,
-            'description'   => "Select #{item['label'] || code} resource instances to include.",
-            'selectOptions' => resources.map { |r| {'name' => r['label'], 'value' => r['resourceId'].to_s} },
-          }
-          resource_prompt = Morpheus::Cli::OptionTypes.prompt([resource_opt_type], options[:options], @api_client)
-          chosen_resource_ids = resource_prompt["resources_#{code}"]
-          chosen_resource_ids = chosen_resource_ids.is_a?(Array) ? chosen_resource_ids : chosen_resource_ids.to_s.split(',').map(&:strip)
-          chosen_resource_ids = chosen_resource_ids.reject { |v| v.to_s.strip.empty? }.uniq
-          chosen_resource_ids.each do |rid|
-            payload_contents << {'code' => code, 'resourceId' => rid.to_i}
+          else
+            # Deduplicate by resourceId in case multiple content type entries map to same resource
+            resources = resources.uniq { |r| r['resourceId'] }
+            # Sanitize dots in code so OptionTypes doesn't interpret the fieldName
+            # as a nested-hash path (it splits fieldName on '.' to build namespaces).
+            safe_code_key = code.gsub('.', '_')
+            resource_opt_type = {
+              'fieldName'     => "resources_#{safe_code_key}",
+              'fieldLabel'    => "#{item['label'] || code} Resources",
+              'type'          => 'multiSelect',
+              'required'      => true,
+              'description'   => "Select #{item['label'] || code} resource instances to include.",
+              'selectOptions' => resources.map { |r| {'name' => r['label'], 'value' => r['resourceId'].to_s} },
+            }
+            resource_prompt = Morpheus::Cli::OptionTypes.prompt([resource_opt_type], options[:options], @api_client)
+            chosen_resource_ids = resource_prompt["resources_#{safe_code_key}"]
+            chosen_resource_ids = chosen_resource_ids.is_a?(Array) ? chosen_resource_ids : chosen_resource_ids.to_s.split(',').map(&:strip)
+            chosen_resource_ids = chosen_resource_ids.reject { |v| v.to_s.strip.empty? }.uniq
+            chosen_resource_ids.each do |rid|
+              payload_contents << {'code' => code, 'resourceId' => rid.to_i}
+            end
           end
         else
           payload_contents << {'code' => code}
         end
+
+        added_values << val
+        break if remaining_options.size <= 1
+        add_another_content = Morpheus::Cli::OptionTypes.confirm("Add another content type?", {default: false})
       end
 
       if payload_contents.empty?
