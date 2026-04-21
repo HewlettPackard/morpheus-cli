@@ -15,7 +15,9 @@ class Morpheus::Cli::Hosts
                        :wiki, :update_wiki,
                        :maintenance, :leave_maintenance, :placement,
                        :list_devices, :assign_device, :detach_device, :attach_device,
-                       :snapshot
+                       :snapshot,
+                       {:'list-available-updates' => :list_available_updates},
+                       {:'apply-update' => :apply_update}
   alias_subcommand :details, :get
   set_default_subcommand :list
 
@@ -2356,6 +2358,116 @@ EOT
       render_response(json_response, options) do
         print_green_success "Syncing software for host #{server['name']}"
         #get([server['id']])
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def list_available_updates(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[host] --system SYSTEM")
+      opts.on('--system SYSTEM', String, "System ID or name the server belongs to.") do |val|
+        options[:system] = val
+      end
+      build_standard_list_options(opts, options)
+      opts.footer = <<-EOT
+List available update definitions for a host.
+[host] is required. This is the name or id of a host.
+--system is required. This is the id of the system.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:1)
+    if options[:system].nil?
+      raise_command_error "The --system option is required.\n#{optparse}"
+    end
+    connect(options)
+    begin
+      server = find_host_by_name_or_id(args[0])
+      return 1 if server.nil?
+      system_id = options[:system]
+      params = {}
+      params.merge!(parse_list_options(options))
+      @servers_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @servers_interface.dry.list_update_definitions(system_id, server['id'], params)
+        return
+      end
+      json_response = @servers_interface.list_update_definitions(system_id, server['id'], params)
+      update_definitions = json_response['updateDefinitions']
+      render_response(json_response, options, 'updateDefinitions') do
+        print_h1 "Available Updates: #{server['name']}", [], options
+        if update_definitions.nil? || update_definitions.empty?
+          print cyan, "No update definitions found.", reset, "\n"
+        else
+          columns = {
+            "ID"          => 'id',
+            "Name"        => 'name',
+            "Version"     => 'updateVersion',
+            "Severity"    => 'severity',
+            "Type"        => 'type',
+            "Reboot"      => lambda {|it| format_boolean(it['requiresReboot']) },
+            "Rollback"    => lambda {|it| format_boolean(it['supportsRollback']) },
+            "Released"    => lambda {|it| it['updateReleaseDate'] ? format_local_dt(it['updateReleaseDate']) : '' },
+          }
+          print cyan
+          print as_pretty_table(update_definitions, columns.upcase_keys!, options)
+          print_results_pagination({size: update_definitions.size, total: (json_response['meta'] ? json_response['meta']['total'] : update_definitions.size)})
+        end
+        print reset, "\n"
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def apply_update(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[host] [updateDefinitionId] --system SYSTEM")
+      opts.on('--system SYSTEM', String, "System ID or name the server belongs to.") do |val|
+        options[:system] = val
+      end
+      opts.on('--dry-run-update', "Execute as a dry run — passes dryRun:true to the server, no changes applied.") do
+        options[:dry_run_update] = true
+      end
+      build_standard_update_options(opts, options)
+      opts.footer = <<-EOT
+Apply an update definition to a host.
+[host] is required. This is the name or id of a host.
+[updateDefinitionId] is required. This is the id of the update definition.
+--system is required. This is the id of the system.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:2)
+    if options[:system].nil?
+      raise_command_error "The --system option is required.\n#{optparse}"
+    end
+    connect(options)
+    begin
+      server = find_host_by_name_or_id(args[0])
+      return 1 if server.nil?
+      update_definition_id = args[1]
+      system_id = options[:system]
+      payload = {}
+      payload['dryRun'] = true if options[:dry_run_update]
+      payload.deep_merge!(parse_passed_options(options))
+      params = {}
+      @servers_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @servers_interface.dry.apply_update_definition(system_id, server['id'], update_definition_id, payload, params)
+        return
+      end
+      json_response = @servers_interface.apply_update_definition(system_id, server['id'], update_definition_id, payload, params)
+      render_response(json_response, options) do
+        print_green_success "Update operation #{json_response['updateOperation']['id']} queued for host #{server['name']}."
       end
       return 0
     rescue RestClient::Exception => e
