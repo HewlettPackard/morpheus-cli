@@ -219,15 +219,15 @@ class Morpheus::ServersInterface < Morpheus::APIClient
     execute(opts)
   end
 
-  def list_update_definitions(systemId, serverId, params = {})
-    url = "#{@base_url}/api/systems/#{systemId}/servers/#{serverId}/update-definitions"
+  def list_update_definitions(serverId, params = {})
+    url = "#{@base_url}/api/servers/#{serverId}/update-definitions"
     headers = { :params => params, :authorization => "Bearer #{@access_token}" }
     opts = {method: :get, url: url, headers: headers}
     execute(opts)
   end
 
-  def apply_update_definition(systemId, serverId, updateDefinitionId, payload = {}, params = {})
-    url = "#{@base_url}/api/systems/#{systemId}/servers/#{serverId}/update-definitions/#{updateDefinitionId}"
+  def apply_update_definition(serverId, updateDefinitionId, payload = {}, params = {})
+    url = "#{@base_url}/api/servers/#{serverId}/update-definitions/#{updateDefinitionId}"
     headers = { :params => params, :authorization => "Bearer #{@access_token}", 'Content-Type' => 'application/json' }
     opts = {method: :post, url: url, headers: headers, payload: payload.to_json}
     execute(opts)
