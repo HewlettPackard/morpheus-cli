@@ -6,7 +6,11 @@ class Morpheus::Cli::Systems
 
   set_command_name :systems
   set_command_description "View and manage systems."
-  register_subcommands :list, :get, :add, :update, :remove, :'add-uninitialized', {:'initialize' => 'exec_initialize'}, {:'validate' => 'exec_validate'}
+  register_subcommands :list, :get, :add, :update, :remove, :'add-uninitialized', {:'initialize' => 'exec_initialize'}, {:'validate' => 'exec_validate'},
+                       {:'list-available-server-updates' => :list_available_server_updates},
+                       {:'apply-server-update' => :apply_server_update},
+                       {:'list-available-storage-updates' => :list_available_storage_updates},
+                       {:'apply-storage-update' => :apply_storage_update}
 
   protected
 
@@ -596,4 +600,205 @@ EOT
     items = result ? (result['systemTypeLayouts'] || result[:systemTypeLayouts] || result['layouts'] || result[:layouts] || []) : []
     items.map { |l| {'id' => l['id'] || l[:id], 'name' => l['name'] || l[:name], 'value' => (l['id'] || l[:id]).to_s, 'code' => l['code'] || l[:code], 'componentTypes' => l['componentTypes'] || l[:componentTypes] || []} }
   end
+
+  def list_available_server_updates(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system] [server]")
+      build_standard_list_options(opts, options)
+      opts.footer = <<-EOT
+List available update definitions for a compute server component of a system.
+[system] is required. This is the name or id of a system.
+[server] is required. This is the name or id of the compute server.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:2)
+    connect(options)
+    begin
+      system = find_by_name_or_id(:systems, args[0])
+      return 1 if system.nil?
+      server = find_by_name_or_id(:servers, args[1])
+      return 1 if server.nil?
+      params = {}
+      params.merge!(parse_list_options(options))
+      @systems_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @systems_interface.dry.list_compute_server_update_definitions(system['id'], server['id'], params)
+        return
+      end
+      json_response = @systems_interface.list_compute_server_update_definitions(system['id'], server['id'], params)
+      update_definitions = json_response['updateDefinitions']
+      render_response(json_response, options, 'updateDefinitions') do
+        print_h1 "Available Server Updates: #{system['name']} / #{server['name']}", [], options
+        if update_definitions.nil? || update_definitions.empty?
+          print cyan, "No update definitions found.", reset, "\n"
+        else
+          columns = {
+            "ID"          => 'id',
+            "Name"        => 'name',
+            "Version"     => 'updateVersion',
+            "Severity"    => 'severity',
+            "Type"        => 'type',
+            "Reboot"      => lambda {|it| format_boolean(it['requiresReboot']) },
+            "Rollback"    => lambda {|it| format_boolean(it['supportsRollback']) },
+            "Released"    => lambda {|it| it['updateReleaseDate'] ? format_local_dt(it['updateReleaseDate']) : '' },
+          }
+          print cyan
+          print as_pretty_table(update_definitions, columns.upcase_keys!, options)
+          print_results_pagination({size: update_definitions.size, total: (json_response['meta'] ? json_response['meta']['total'] : update_definitions.size)})
+        end
+        print reset, "\n"
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def apply_server_update(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system] [server] [updateDefinitionId]")
+      opts.on('--dry-run-update', "Execute as a dry run — passes dryRun:true to the server, no changes applied.") do
+        options[:dry_run_update] = true
+      end
+      build_standard_update_options(opts, options)
+      opts.footer = <<-EOT
+Apply an update definition to a compute server component of a system.
+[system] is required. This is the name or id of a system.
+[server] is required. This is the name or id of the compute server.
+[updateDefinitionId] is required. This is the id of the update definition.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:3)
+    connect(options)
+    begin
+      system = find_by_name_or_id(:systems, args[0])
+      return 1 if system.nil?
+      server = find_by_name_or_id(:servers, args[1])
+      return 1 if server.nil?
+      update_definition_id = args[2]
+      payload = {}
+      payload['dryRun'] = true if options[:dry_run_update]
+      payload.deep_merge!(parse_passed_options(options))
+      params = {}
+      @systems_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @systems_interface.dry.apply_compute_server_update_definition(system['id'], server['id'], update_definition_id, payload, params)
+        return
+      end
+      json_response = @systems_interface.apply_compute_server_update_definition(system['id'], server['id'], update_definition_id, payload, params)
+      render_response(json_response, options) do
+        print_green_success "Update operation #{json_response['updateOperation']['id']} queued for server #{server['name']} on system #{system['name']}."
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def list_available_storage_updates(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system] [storage-server]")
+      build_standard_list_options(opts, options)
+      opts.footer = <<-EOT
+List available update definitions for a storage server component of a system.
+[system] is required. This is the name or id of a system.
+[storage-server] is required. This is the name or id of the storage server.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:2)
+    connect(options)
+    begin
+      system = find_by_name_or_id(:systems, args[0])
+      return 1 if system.nil?
+      storage_server = find_by_name_or_id(:storage_servers, args[1])
+      return 1 if storage_server.nil?
+      params = {}
+      params.merge!(parse_list_options(options))
+      @systems_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @systems_interface.dry.list_storage_server_update_definitions(system['id'], storage_server['id'], params)
+        return
+      end
+      json_response = @systems_interface.list_storage_server_update_definitions(system['id'], storage_server['id'], params)
+      update_definitions = json_response['updateDefinitions']
+      render_response(json_response, options, 'updateDefinitions') do
+        print_h1 "Available Storage Updates: #{system['name']} / #{storage_server['name']}", [], options
+        if update_definitions.nil? || update_definitions.empty?
+          print cyan, "No update definitions found.", reset, "\n"
+        else
+          columns = {
+            "ID"          => 'id',
+            "Name"        => 'name',
+            "Version"     => 'updateVersion',
+            "Severity"    => 'severity',
+            "Type"        => 'type',
+            "Reboot"      => lambda {|it| format_boolean(it['requiresReboot']) },
+            "Rollback"    => lambda {|it| format_boolean(it['supportsRollback']) },
+            "Released"    => lambda {|it| it['updateReleaseDate'] ? format_local_dt(it['updateReleaseDate']) : '' },
+          }
+          print cyan
+          print as_pretty_table(update_definitions, columns.upcase_keys!, options)
+          print_results_pagination({size: update_definitions.size, total: (json_response['meta'] ? json_response['meta']['total'] : update_definitions.size)})
+        end
+        print reset, "\n"
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def apply_storage_update(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system] [storage-server] [updateDefinitionId]")
+      opts.on('--dry-run-update', "Execute as a dry run — passes dryRun:true to the server, no changes applied.") do
+        options[:dry_run_update] = true
+      end
+      build_standard_update_options(opts, options)
+      opts.footer = <<-EOT
+Apply an update definition to a storage server component of a system.
+[system] is required. This is the name or id of a system.
+[storage-server] is required. This is the name or id of the storage server.
+[updateDefinitionId] is required. This is the id of the update definition.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:3)
+    connect(options)
+    begin
+      system = find_by_name_or_id(:systems, args[0])
+      return 1 if system.nil?
+      storage_server = find_by_name_or_id(:storage_servers, args[1])
+      return 1 if storage_server.nil?
+      update_definition_id = args[2]
+      payload = {}
+      payload['dryRun'] = true if options[:dry_run_update]
+      payload.deep_merge!(parse_passed_options(options))
+      params = {}
+      @systems_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @systems_interface.dry.apply_storage_server_update_definition(system['id'], storage_server['id'], update_definition_id, payload, params)
+        return
+      end
+      json_response = @systems_interface.apply_storage_server_update_definition(system['id'], storage_server['id'], update_definition_id, payload, params)
+      render_response(json_response, options) do
+        print_green_success "Update operation #{json_response['updateOperation']['id']} queued for storage server #{storage_server['name']} on system #{system['name']}."
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
 end
