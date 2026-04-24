@@ -10,7 +10,11 @@ class Morpheus::Cli::Systems
                        {:'list-available-server-updates' => :list_available_server_updates},
                        {:'apply-server-update' => :apply_server_update},
                        {:'list-available-storage-updates' => :list_available_storage_updates},
-                       {:'apply-storage-update' => :apply_storage_update}
+				       {:'apply-storage-update' => :apply_storage_update},
+				       {:'list-available-network-updates' => :list_available_network_updates},
+				       {:'apply-network-update' => :apply_network_update},
+				       {:'list-available-network-server-updates' => :list_available_network_server_updates},
+				       {:'apply-network-server-update' => :apply_network_server_update}
 
   protected
 
@@ -799,6 +803,114 @@ EOT
       print_rest_exception(e, options)
       exit 1
     end
+  end
+
+  def list_available_network_server_updates(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system] [network-server]")
+      build_standard_list_options(opts, options)
+      opts.footer = <<-EOT
+List available update definitions for a network server component of a system.
+[system] is required. This is the name or id of a system.
+[network-server] is required. This is the name or id of the network server.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:2)
+    connect(options)
+    begin
+      system = find_by_name_or_id(:systems, args[0])
+      return 1 if system.nil?
+      network_server = find_by_name_or_id(:network_servers, args[1])
+      return 1 if network_server.nil?
+      params = {}
+      params.merge!(parse_list_options(options))
+      @systems_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @systems_interface.dry.list_network_server_update_definitions(system['id'], network_server['id'], params)
+        return
+      end
+      json_response = @systems_interface.list_network_server_update_definitions(system['id'], network_server['id'], params)
+      update_definitions = json_response['updateDefinitions']
+      render_response(json_response, options, 'updateDefinitions') do
+        print_h1 "Available Network Server Updates: #{system['name']} / #{network_server['name']}", [], options
+        if update_definitions.nil? || update_definitions.empty?
+          print cyan, "No update definitions found.", reset, "\n"
+        else
+          columns = {
+            "ID"          => 'id',
+            "Name"        => 'name',
+            "Version"     => 'updateVersion',
+            "Severity"    => 'severity',
+            "Type"        => 'type',
+            "Reboot"      => lambda {|it| format_boolean(it['requiresReboot']) },
+            "Rollback"    => lambda {|it| format_boolean(it['supportsRollback']) },
+            "Released"    => lambda {|it| it['updateReleaseDate'] ? format_local_dt(it['updateReleaseDate']) : '' },
+          }
+          print cyan
+          print as_pretty_table(update_definitions, columns.upcase_keys!, options)
+          print_results_pagination({size: update_definitions.size, total: (json_response['meta'] ? json_response['meta']['total'] : update_definitions.size)})
+        end
+        print reset, "\n"
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def list_available_network_updates(args)
+    list_available_network_server_updates(args)
+  end
+
+  def apply_network_server_update(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system] [network-server] [updateDefinitionId]")
+      opts.on('--dry-run-update', "Execute as a dry run — passes dryRun:true to the server, no changes applied.") do
+        options[:dry_run_update] = true
+      end
+      build_standard_update_options(opts, options)
+      opts.footer = <<-EOT
+Apply an update definition to a network server component of a system.
+[system] is required. This is the name or id of a system.
+[network-server] is required. This is the name or id of the network server.
+[updateDefinitionId] is required. This is the id of the update definition.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:3)
+    connect(options)
+    begin
+      system = find_by_name_or_id(:systems, args[0])
+      return 1 if system.nil?
+      network_server = find_by_name_or_id(:network_servers, args[1])
+      return 1 if network_server.nil?
+      update_definition_id = args[2]
+      payload = {}
+      payload['dryRun'] = true if options[:dry_run_update]
+      payload.deep_merge!(parse_passed_options(options))
+      params = {}
+      @systems_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @systems_interface.dry.apply_network_server_update_definition(system['id'], network_server['id'], update_definition_id, payload, params)
+        return
+      end
+      json_response = @systems_interface.apply_network_server_update_definition(system['id'], network_server['id'], update_definition_id, payload, params)
+      render_response(json_response, options) do
+        print_green_success "Update operation #{json_response['updateOperation']['id']} queued for network server #{network_server['name']} on system #{system['name']}."
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def apply_network_update(args)
+    apply_network_server_update(args)
   end
 
 end
