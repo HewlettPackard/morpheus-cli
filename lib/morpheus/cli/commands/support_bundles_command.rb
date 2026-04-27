@@ -46,6 +46,7 @@ class Morpheus::Cli::SupportBundlesCommand
           {"ID" => lambda {|it| it['id'] } },
           {"NAME" => lambda {|it| it['name'] } },
           {"STATUS" => lambda {|it| format_support_bundle_status(it) } },
+          {"DELIVERY" => lambda {|it| it['deliveryStatus'] ? format_support_bundle_delivery_status(it) : '' } },
           {"SIZE" => lambda {|it| it['contentLength'] ? format_bytes(it['contentLength']) : '' } },
           {"CREATED" => lambda {|it| format_local_dt(it['startedAt']) } },
         ]
@@ -92,6 +93,9 @@ EOT
         "UUID" => 'uuid',
         "Status" => lambda {|it| format_support_bundle_status(it) },
         "Status Message" => 'statusMessage',
+        "Categories" => 'categories',
+        "Log Window Start" => lambda {|it| format_local_dt(it['startDate']) },
+        "Log Window End" => lambda {|it| format_local_dt(it['endDate']) },
         "Started At" => lambda {|it| format_local_dt(it['startedAt']) },
         "Completed At" => lambda {|it| format_local_dt(it['completedAt']) },
         "File Path" => 'filePath',
@@ -99,6 +103,8 @@ EOT
         "Content Type" => 'contentType',
         "Checksum" => 'checksum',
         "Storage Provider" => lambda {|it| it['storageProvider'] ? it['storageProvider']['name'] : '' },
+        "Delivery Status" => lambda {|it| it['deliveryStatus'] ? format_support_bundle_delivery_status(it) : nil },
+        "Delivered File" => lambda {|it| it['deliveredFilename'] },
       }
       print_description_list(columns, bundle, options)
       print reset, "\n"
@@ -135,10 +141,11 @@ EOT
 Generate a new support bundle. Bundle generation is asynchronous -- the bundle
 will be queued and processed in the background.
 
-Without --all, you will be prompted to select contents from the list of
-available types, grouped by category.
-Pass --all to include every eligible content type automatically without
-being prompted.
+Without --all, you will be prompted to select one or more categories,
+then for each category you will select either specific content types
+(standalone categories) or specific resource instances (resource-backed
+categories). Pass --all to include every eligible content type
+automatically without being prompted.
 
 Use --start-date and --end-date to restrict the log collection window.
 EOT
@@ -201,75 +208,95 @@ EOT
     elsif payload['contents'].is_a?(Array)
       # honor payload-provided contents and skip interactive selection
     else
-      # Fetch all available content types in one call (no category filter)
-      all_content_options = @api_client.options.options_for_source('supportBundles/contentTypes', {})['data'] || []
-      if all_content_options.empty?
-        print yellow, "No support bundle content types are available.", reset, "\n"
+      # Fetch categories once up front
+      category_options = @api_client.options.options_for_source('supportBundles/supportBundleCategories', {})['data'] || []
+      if category_options.empty?
+        print yellow, "No support bundle categories are available.", reset, "\n"
         return 1
       end
+      category_select_options = category_options.map { |it| {'name' => it['label'] || it['name'], 'value' => it['value']} }
 
-      all_content_options_by_value = all_content_options.each_with_object({}) { |it, h| h[it['value'].to_s] = it }
+      # Cache combined item lists per category so repeated visits don't re-fetch
+      combined_options_cache = {}
 
       payload_contents = []
-      added_values = []
-      add_another_content = true
-      while add_another_content do
-        remaining_options = all_content_options.reject { |it| added_values.include?(it['value'].to_s) }
-        break if remaining_options.empty?
+      add_another_row = true
 
-        content_opt_type = {
-          'fieldName'     => 'content',
-          'fieldLabel'    => 'Contents',
+      while add_another_row do
+        # Step 1: pick a category for this row
+        category_opt_type = {
+          'fieldName'     => 'row_category',
+          'fieldLabel'    => 'Category',
           'type'          => 'select',
           'required'      => true,
-          'description'   => 'Select a content type to include in the bundle.',
-          'selectOptions' => remaining_options.map { |it| {'name' => it['label'] || it['name'], 'value' => it['value']} },
+          'description'   => 'Select a category.',
+          'selectOptions' => category_select_options,
         }
-        content_result = Morpheus::Cli::OptionTypes.prompt([content_opt_type], options[:options], @api_client)
-        val = content_result['content'].to_s.strip
-        break if val.empty?
+        category_result = Morpheus::Cli::OptionTypes.prompt([category_opt_type], options[:options], @api_client)
+        category_value = category_result['row_category'].to_s.strip
+        break if category_value.empty?
 
-        item = all_content_options_by_value[val]
-        code = item ? item['code'].to_s : val
+        category_label = (category_options.find { |c| c['value'].to_s == category_value } || {})['label'] || category_value
 
-        if item && item['isResourceBacked']
-          # Fetch available resource instances for this content type
-          resources = @api_client.options.options_for_source('supportBundles/contentTypeResources', {contentTypeCode: code})['data'] || []
-          if resources.empty?
-            print yellow, "No resources found for content type '#{item['label'] || code}', skipping.", reset, "\n"
-          else
-            # Deduplicate by resourceId in case multiple content type entries map to same resource
-            resources = resources.uniq { |r| r['resourceId'] }
-            # Sanitize dots in code so OptionTypes doesn't interpret the fieldName
-            # as a nested-hash path (it splits fieldName on '.' to build namespaces).
-            safe_code_key = code.gsub('.', '_')
-            resource_opt_type = {
-              'fieldName'     => "resources_#{safe_code_key}",
-              'fieldLabel'    => "#{item['label'] || code} Resources",
-              'type'          => 'multiSelect',
-              'required'      => true,
-              'description'   => "Select #{item['label'] || code} resource instances to include.",
-              'selectOptions' => resources.map { |r| {'name' => r['label'], 'value' => r['resourceId'].to_s} },
-            }
-            resource_prompt = Morpheus::Cli::OptionTypes.prompt([resource_opt_type], options[:options], @api_client)
-            chosen_resource_ids = resource_prompt["resources_#{safe_code_key}"]
-            chosen_resource_ids = chosen_resource_ids.is_a?(Array) ? chosen_resource_ids : chosen_resource_ids.to_s.split(',').map(&:strip)
-            chosen_resource_ids = chosen_resource_ids.reject { |v| v.to_s.strip.empty? }.uniq
-            chosen_resource_ids.each do |rid|
-              payload_contents << {'code' => code, 'resourceId' => rid.to_i}
+        # Step 2: build (or retrieve cached) combined item list for this category
+        unless combined_options_cache.key?(category_value)
+          content_type_data = @api_client.options.options_for_source('supportBundles/contentTypes', {category: category_value})['data'] || []
+          opts = []         # select options shown to the user
+          full_value_map = {} # user-visible value -> full internal value
+          # Standalone entries: user types/sees the code
+          content_type_data.reject { |ct| ct['isResourceBacked'] }.each do |ct|
+            code = ct['code'] || ct['value']
+            opts << {'name' => ct['label'] || ct['name'], 'value' => code}
+            full_value_map[code] = code
+          end
+          # Resource instances: user types/sees the numeric resourceId
+          if content_type_data.any? { |ct| ct['isResourceBacked'] }
+            resources = @api_client.options.options_for_source('supportBundles/contentTypeResources', {category: category_value})['data'] || []
+            resources.each do |r|
+              rid = r['resourceId'].to_s
+              opts << {'name' => r['label'], 'value' => rid}
+              full_value_map[rid] = "#{r['code']}|#{r['resourceId']}"
             end
           end
-        else
-          payload_contents << {'code' => code}
+          combined_options_cache[category_value] = {opts: opts, map: full_value_map}
         end
 
-        added_values << val
-        break if remaining_options.size <= 1
-        add_another_content = Morpheus::Cli::OptionTypes.confirm("Add another content type?", {default: false})
+        cached        = combined_options_cache[category_value]
+        combined_opts = cached[:opts]
+        full_value_map = cached[:map]
+        if combined_opts.empty?
+          print yellow, "No items found for category '#{category_label}', skipping.", reset, "\n"
+        else
+          # Step 3: pick one item from the combined list
+          item_opt_type = {
+            'fieldName'     => 'row_item',
+            'fieldLabel'    => category_label,
+            'type'          => 'select',
+            'required'      => true,
+            'description'   => "Select an item from '#{category_label}'.",
+            'selectOptions' => combined_opts,
+          }
+          item_result = Morpheus::Cli::OptionTypes.prompt([item_opt_type], options[:options], @api_client)
+          item_key = item_result['row_item'].to_s.strip
+          item_value = full_value_map[item_key] || item_key
+
+          unless item_value.empty?
+            if item_value.include?('|')
+              # Resource-backed: "code|resourceId"
+              code, resource_id = item_value.split('|', 2)
+              payload_contents << {'code' => code, 'resourceId' => resource_id.to_i} unless code.to_s.empty? || resource_id.to_s.strip.empty?
+            else
+              # Standalone
+              payload_contents << {'code' => item_value}
+            end
+          end
+        end
+
+        add_another_row = Morpheus::Cli::OptionTypes.confirm("Add another item?", {default: false})
       end
 
       if payload_contents.empty?
-        print yellow, "No content types selected.", reset, "\n"
+        print yellow, "No items selected.", reset, "\n"
         return 1
       end
 
@@ -532,6 +559,24 @@ EOT
         raise e
       end
     end
+  end
+
+  def format_support_bundle_delivery_status(bundle, return_color = cyan)
+    out = ""
+    status_str = bundle['deliveryStatus'].to_s.upcase
+    case status_str
+    when 'DELIVERED'
+      out << "#{green}DELIVERED#{return_color}"
+    when 'IN_PROGRESS'
+      out << "#{cyan}IN PROGRESS#{return_color}"
+    when 'FAILED'
+      out << "#{red}FAILED#{return_color}"
+    when 'SUPERSEDED'
+      out << "#{yellow}SUPERSEDED#{return_color}"
+    else
+      out << "#{yellow}#{bundle['deliveryStatus']}#{return_color}"
+    end
+    out
   end
 
   def format_support_bundle_status(bundle, return_color = cyan)
