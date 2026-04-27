@@ -66,4 +66,97 @@ class SystemsCommandTest < Test::Unit::TestCase
     assert_equal '3', captured_request[:update_definition_id]
   end
 
+  def test_update_dry_run_with_components_payload
+    command = Morpheus::Cli::Systems.new
+    captured_request = nil
+    interface = Object.new
+    interface.define_singleton_method(:get) do |id|
+      {'system' => {'id' => id, 'name' => "system-#{id}"}}
+    end
+    interface.define_singleton_method(:dry) { self }
+    interface.define_singleton_method(:update) do |id, payload|
+      {method: :put, id: id, payload: payload}
+    end
+    command.define_singleton_method(:connect) do |options|
+    end
+    command.define_singleton_method(:rest_interface) do
+      interface
+    end
+    command.define_singleton_method(:print_dry_run) do |request|
+      captured_request = request
+    end
+
+    result = command.send(:update, ['--dry-run', '1', '--description', 'updated', '--component', '{"id":17,"name":"CN-CLI-1"}', '--component', '{"typeCode":"dummy-storage-controller","name":"SC-CLI-1"}'])
+
+    assert_nil result
+    assert_equal :put, captured_request[:method]
+    assert_equal 1, captured_request[:id]
+    assert_equal 'updated', captured_request[:payload]['system']['description']
+    assert_equal 2, captured_request[:payload]['system']['components'].size
+    assert_equal 17, captured_request[:payload]['system']['components'][0]['id']
+    assert_equal 'dummy-storage-controller', captured_request[:payload]['system']['components'][1]['typeCode']
+  end
+
+  def test_update_dry_run_allows_empty_components_array
+    command = Morpheus::Cli::Systems.new
+    captured_request = nil
+    interface = Object.new
+    interface.define_singleton_method(:get) do |id|
+      {'system' => {'id' => id, 'name' => "system-#{id}"}}
+    end
+    interface.define_singleton_method(:dry) { self }
+    interface.define_singleton_method(:update) do |id, payload|
+      {method: :put, id: id, payload: payload}
+    end
+    command.define_singleton_method(:connect) do |options|
+    end
+    command.define_singleton_method(:rest_interface) do
+      interface
+    end
+    command.define_singleton_method(:print_dry_run) do |request|
+      captured_request = request
+    end
+
+    result = command.send(:update, ['--dry-run', '1', '--components', '[]'])
+
+    assert_nil result
+    assert_equal :put, captured_request[:method]
+    assert_equal [], captured_request[:payload]['system']['components']
+  end
+
+  def test_render_response_for_get_includes_components_table
+    command = Morpheus::Cli::Systems.new
+    captured_rows = nil
+    command.define_singleton_method(:render_response) do |json_response, options, key, &block|
+      block.call if block
+    end
+    command.define_singleton_method(:print_h1) do |*args|
+    end
+    command.define_singleton_method(:print_h2) do |*args|
+    end
+    command.define_singleton_method(:print_description_list) do |*args|
+    end
+    command.define_singleton_method(:print) do |*args|
+    end
+    command.define_singleton_method(:as_pretty_table) do |rows, columns, options|
+      captured_rows = rows
+      "TABLE"
+    end
+
+    command.send(:render_response_for_get, {
+      'system' => {
+        'id' => 1,
+        'name' => 'system-1',
+        'components' => [
+          {'id' => 17, 'name' => 'CN-CLI-1', 'externalId' => 'ext-17', 'type' => {'code' => 'dummy-compute-node', 'name' => 'Compute Node'}}
+        ]
+      }
+    }, {})
+
+    assert_equal 1, captured_rows.size
+    assert_equal 17, captured_rows[0][:id]
+    assert_equal 'dummy-compute-node', captured_rows[0][:type_code]
+    assert_equal 'ext-17', captured_rows[0][:external_id]
+  end
+
 end

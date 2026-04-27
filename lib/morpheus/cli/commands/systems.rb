@@ -27,6 +27,11 @@ class Morpheus::Cli::Systems
     'systems'
   end
 
+  # Required so find_by_name_or_id(:servers, id) resolves the lowercase 'server' key
+  def server_object_key
+    'server'
+  end
+
   def system_list_column_definitions(options)
     {
       "ID" => 'id',
@@ -60,6 +65,20 @@ class Morpheus::Cli::Systems
       print cyan
       print_description_list(rest_column_definitions(options), record, options)
       print reset,"\n"
+      components = record['components'] || []
+      if components.any?
+      	print_h2 "Components (#{components.size})", options
+      	component_rows = components.collect do |component|
+      		{
+      			id: component['id'],
+      			name: component['name'],
+      			type_code: component.dig('type', 'code'),
+      			type_name: component.dig('type', 'name'),
+      			external_id: component['externalId']
+      		}
+      	end
+      	print as_pretty_table(component_rows, [:id, :name, :type_code, :type_name, :external_id], options)
+      end
     end
   end
 
@@ -543,17 +562,38 @@ EOT
   def update(args)
     options = {}
     params = {}
+    components = []
+    components_specified = false
     optparse = Morpheus::Cli::OptionParser.new do |opts|
-      opts.banner = subcommand_usage("[system] --name --description")
+      opts.banner = subcommand_usage("[system]")
       opts.on("--name NAME", String, "Updates System Name") do |val|
         params['name'] = val.to_s
       end
       opts.on("--description [TEXT]", String, "Updates System Description") do |val|
         params['description'] = val.to_s
       end
+      opts.on('--enabled [on|off]', String, "Set whether the system is enabled") do |val|
+        params['enabled'] = val.to_s
+      end
+      opts.on('--externalId ID', String, "Set the external ID") do |val|
+        params['externalId'] = val.to_s
+      end
+      opts.on('--config JSON', String, "Set config JSON") do |val|
+        params['config'] = JSON.parse(val)
+      end
+      opts.on('--component JSON', String, "Component JSON (can be repeated). Pass the full desired component set when using component updates.") do |val|
+        components_specified = true
+        components << JSON.parse(val)
+      end
+      opts.on('--components JSON', String, "Components JSON array. This should be the full desired final component list.") do |val|
+        components_specified = true
+        components.concat(JSON.parse(val))
+      end
       build_standard_update_options(opts, options, [:find_by_name])
       opts.footer = <<-EOT
 Update an existing system.
+If system.components is supplied, it is authoritative: omitted components will be removed.
+Omit the components key entirely to leave components unchanged.
 [system] is required. This is the name or id of a system.
 EOT
     end
@@ -575,6 +615,9 @@ EOT
     params.booleanize!
 
     payload = parse_payload(options) || {rest_object_key => params}
+    payload[rest_object_key] ||= {}
+    payload[rest_object_key].deep_merge!(params) unless params.empty?
+    payload[rest_object_key]['components'] = components if components_specified
     if payload[rest_object_key].nil? || payload[rest_object_key].empty?
       raise_command_error "Specify at least one option to update.\n#{optparse}"
     end
