@@ -13,8 +13,10 @@ class Morpheus::Cli::Systems
 				       {:'apply-storage-update' => :apply_storage_update},
 				       {:'list-available-network-updates' => :list_available_network_updates},
 				       {:'apply-network-update' => :apply_network_update},
-				       {:'list-available-network-server-updates' => :list_available_network_server_updates},
-				       {:'apply-network-server-update' => :apply_network_server_update}
+                       {:'list-available-network-server-updates' => :list_available_network_server_updates},
+			       {:'apply-network-server-update' => :apply_network_server_update},
+			       {:'list-available-cluster-updates' => :list_available_cluster_updates},
+			       {:'apply-cluster-update' => :apply_cluster_update}
 
   protected
 
@@ -954,6 +956,131 @@ EOT
 
   def apply_network_update(args)
     apply_network_server_update(args)
+  end
+
+  def list_available_cluster_updates(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system] [cluster]")
+      build_standard_list_options(opts, options)
+      opts.footer = <<-EOT
+List available update definitions for a cluster component of a system.
+[system] is required. This is the name or id of a system.
+[cluster] is required. This is the name or id of the cluster.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:2)
+    connect(options)
+    begin
+      system = find_by_name_or_id(:systems, args[0])
+      return 1 if system.nil?
+      cluster = find_cluster_by_name_or_id(args[1])
+      return 1 if cluster.nil?
+      params = {}
+      params.merge!(parse_list_options(options))
+      @systems_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @systems_interface.dry.list_cluster_update_definitions(system['id'], cluster['id'], params)
+        return
+      end
+      json_response = @systems_interface.list_cluster_update_definitions(system['id'], cluster['id'], params)
+      update_definitions = json_response['updateDefinitions']
+      render_response(json_response, options, 'updateDefinitions') do
+        print_h1 "Available Cluster Updates: #{system['name']} / #{cluster['name']}", [], options
+        if update_definitions.nil? || update_definitions.empty?
+          print cyan, "No update definitions found.", reset, "\n"
+        else
+          columns = {
+            "ID"          => 'id',
+            "Name"        => 'name',
+            "Version"     => 'updateVersion',
+            "Severity"    => 'severity',
+            "Type"        => 'type',
+            "Reboot"      => lambda {|it| format_boolean(it['requiresReboot']) },
+            "Rollback"    => lambda {|it| format_boolean(it['supportsRollback']) },
+            "Released"    => lambda {|it| it['updateReleaseDate'] ? format_local_dt(it['updateReleaseDate']) : '' },
+          }
+          print cyan
+          print as_pretty_table(update_definitions, columns.upcase_keys!, options)
+          print_results_pagination({size: update_definitions.size, total: (json_response['meta'] ? json_response['meta']['total'] : update_definitions.size)})
+        end
+        print reset, "\n"
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def apply_cluster_update(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system] [cluster] [updateDefinitionId]")
+      opts.on('--dry-run-update', "Execute as a dry run — passes dryRun:true to the server, no changes applied.") do
+        options[:dry_run_update] = true
+      end
+      build_standard_update_options(opts, options)
+      opts.footer = <<-EOT
+Apply an update definition to a cluster component of a system.
+[system] is required. This is the name or id of a system.
+[cluster] is required. This is the name or id of the cluster.
+[updateDefinitionId] is required. This is the id of the update definition.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:3)
+    connect(options)
+    begin
+      system = find_by_name_or_id(:systems, args[0])
+      return 1 if system.nil?
+      cluster = find_cluster_by_name_or_id(args[1])
+      return 1 if cluster.nil?
+      update_definition_id = args[2]
+      payload = {}
+      payload['dryRun'] = true if options[:dry_run_update]
+      payload.deep_merge!(parse_passed_options(options))
+      params = {}
+      @systems_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @systems_interface.dry.apply_cluster_update_definition(system['id'], cluster['id'], update_definition_id, payload, params)
+        return
+      end
+      json_response = @systems_interface.apply_cluster_update_definition(system['id'], cluster['id'], update_definition_id, payload, params)
+      render_response(json_response, options) do
+        print_green_success "Update operation #{json_response['updateOperation']['id']} queued for cluster #{cluster['name']} on system #{system['name']}."
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  private
+
+  def find_cluster_by_name_or_id(val)
+    if val.to_s =~ /\A\d{1,}\Z/
+      json_result = @api_client.clusters.get(val.to_i)
+      cluster = json_result['cluster']
+      if cluster.nil?
+        print_red_alert "Cluster not found by id #{val}"
+        return nil
+      end
+      cluster
+    else
+      json_result = @api_client.clusters.list({name: val})
+      clusters = json_result['clusters']
+      if clusters.nil? || clusters.empty?
+        print_red_alert "Cluster not found by name '#{val}'"
+        return nil
+      elsif clusters.size > 1
+        print_red_alert "#{clusters.size} clusters found by name '#{val}'. Use the id instead."
+        return nil
+      end
+      clusters.first
+    end
   end
 
 end
