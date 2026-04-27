@@ -85,6 +85,7 @@ class Morpheus::Cli::Systems
   def add(args)
     options = {}
     params = {}
+    components = []
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[name]")
       opts.on('--name NAME', String, "System Name") do |val|
@@ -99,6 +100,12 @@ class Morpheus::Cli::Systems
       opts.on('--layout LAYOUT', String, "System Layout ID or name") do |val|
         params['layout'] = val
       end
+      opts.on('--component JSON', String, "Component JSON (can be repeated). e.g. '{\"typeCode\":\"compute-node\",\"name\":\"CN-1\"}'") do |val|
+        components << JSON.parse(val)
+      end
+      opts.on('--components JSON', String, "Components JSON array") do |val|
+        components.concat(JSON.parse(val))
+      end
       build_standard_add_options(opts, options)
       opts.footer = "Create a new system.\n[name] is optional and can be passed as the first argument."
     end
@@ -111,6 +118,7 @@ class Morpheus::Cli::Systems
       payload[rest_object_key] ||= {}
       payload[rest_object_key].deep_merge!(params) unless params.empty?
       payload[rest_object_key]['name'] ||= args[0] if args[0]
+      payload[rest_object_key]['components'] = components unless components.empty?
     else
       system_payload = {}
 
@@ -172,6 +180,7 @@ class Morpheus::Cli::Systems
         end
       end
 
+      system_payload['components'] = components unless components.empty?
       payload = {rest_object_key => system_payload}
     end
 
