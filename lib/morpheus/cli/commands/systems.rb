@@ -7,6 +7,8 @@ class Morpheus::Cli::Systems
   set_command_name :systems
   set_command_description "View and manage systems."
   register_subcommands :list, :get, :add, :update, :remove, :'add-uninitialized', {:'initialize' => 'exec_initialize'}, {:'validate' => 'exec_validate'},
+                       {:'list-types' => :list_types},
+                       {:'list-layouts' => :list_layouts},
                        {:'list-available-server-updates' => :list_available_server_updates},
                        {:'apply-server-update' => :apply_server_update},
                        {:'list-available-storage-updates' => :list_available_storage_updates},
@@ -657,6 +659,98 @@ EOT
     result = @api_client.system_types.list_layouts(type_id, {'max' => 100})
     items = result ? (result['systemTypeLayouts'] || result[:systemTypeLayouts] || result['layouts'] || result[:layouts] || []) : []
     items.map { |l| {'id' => l['id'] || l[:id], 'name' => l['name'] || l[:name], 'value' => (l['id'] || l[:id]).to_s, 'code' => l['code'] || l[:code], 'componentTypes' => l['componentTypes'] || l[:componentTypes] || []} }
+  end
+
+  def list_types(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage()
+      build_standard_list_options(opts, options)
+      opts.footer = "List available system types."
+    end
+    optparse.parse!(args)
+    connect(options)
+    begin
+      params = {}
+      params.merge!(parse_list_options(options))
+      @system_types_interface = @api_client.system_types
+      @system_types_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @system_types_interface.dry.list(params)
+        return 0
+      end
+      json_response = @system_types_interface.list(params)
+      system_types = json_response['systemTypes'] || []
+      render_response(json_response, options, 'systemTypes') do
+        print_h1 "System Types", [], options
+        if system_types.empty?
+          print cyan, "No system types found.", reset, "\n"
+        else
+          columns = {
+            "ID"   => 'id',
+            "Name" => 'name',
+            "Code" => 'code',
+          }
+          print cyan
+          print as_pretty_table(system_types, columns.upcase_keys!, options)
+          print_results_pagination({size: system_types.size, total: (json_response['meta'] ? json_response['meta']['total'] : system_types.size)})
+        end
+        print reset, "\n"
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def list_layouts(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[type]")
+      build_standard_list_options(opts, options)
+      opts.footer = <<-EOT
+List available layouts for a system type.
+[type] is required. This is the id of a system type.
+Use 'systems list-types' to find the type id.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:1)
+    connect(options)
+    begin
+      type_id = args[0].to_i
+      params = {}
+      params.merge!(parse_list_options(options))
+      @system_types_interface = @api_client.system_types
+      @system_types_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @system_types_interface.dry.list_layouts(type_id, params)
+        return 0
+      end
+      json_response = @system_types_interface.list_layouts(type_id, params)
+      layouts = json_response['systemTypeLayouts'] || []
+      render_response(json_response, options, 'systemTypeLayouts') do
+        print_h1 "System Type Layouts", [], options
+        if layouts.empty?
+          print cyan, "No layouts found.", reset, "\n"
+        else
+          columns = {
+            "ID"   => 'id',
+            "Name" => 'name',
+            "Code" => 'code',
+          }
+          print cyan
+          print as_pretty_table(layouts, columns.upcase_keys!, options)
+          print_results_pagination({size: layouts.size, total: (json_response['meta'] ? json_response['meta']['total'] : layouts.size)})
+        end
+        print reset, "\n"
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
   end
 
   def list_available_server_updates(args)
