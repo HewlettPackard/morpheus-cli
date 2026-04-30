@@ -94,8 +94,8 @@ EOT
         "Status" => lambda {|it| format_support_bundle_status(it) },
         "Status Message" => 'statusMessage',
         "Categories" => 'categories',
-        "Log Window Start" => lambda {|it| format_local_dt(it['startDate']) },
-        "Log Window End" => lambda {|it| format_local_dt(it['endDate']) },
+        "Log Range Start" => lambda {|it| format_local_dt(it['startDate']) },
+        "Log Range End" => lambda {|it| format_local_dt(it['endDate']) },
         "Started At" => lambda {|it| format_local_dt(it['startedAt']) },
         "Completed At" => lambda {|it| format_local_dt(it['completedAt']) },
         "File Path" => 'filePath',
@@ -124,10 +124,10 @@ EOT
       opts.on('--storage-provider ID', String, "Storage bucket to write the bundle to.") do |val|
         options[:storage_provider_id] = val
       end
-      opts.on('--start-date DATE', String, "Start of the log collection window (required). Accepts ISO 8601 formats like '2026-01-15' or '2026-01-15T00:00:00Z'.") do |val|
+      opts.on('--log-range-start DATE', String, "Start of the log collection window (required). Accepts ISO 8601 formats like '2026-01-15' or '2026-01-15T00:00:00Z'.") do |val|
         options[:start_date] = val
       end
-      opts.on('--end-date DATE', String, "End of the log collection window. Accepts formats like '2026-01-15' or '2026-01-15T23:59:59'. Defaults to now.") do |val|
+      opts.on('--log-range-end DATE', String, "End of the log collection window. Accepts formats like '2026-01-15' or '2026-01-15T23:59:59'. Defaults to now.") do |val|
         options[:end_date] = val
       end
       opts.on('--refresh [SECONDS]', String, "Poll until bundle generation is complete. Default interval is #{default_refresh_interval} seconds.") do |val|
@@ -147,7 +147,7 @@ then for each category you will select either specific content types
 categories). Pass --all to include every eligible content type
 automatically without being prompted.
 
-Use --start-date and --end-date to restrict the log collection window.
+Use --log-range-start and --log-range-end to restrict the log collection window.
 EOT
     end
     optparse.parse!(args)
@@ -156,9 +156,9 @@ EOT
     @support_bundles_interface.setopts(options)
     payload = parse_payload(options) || {}
 
-    # startDate is required — either via --start-date flag or payload
+    # startDate is required — either via --log-range-start flag or payload
     if options[:start_date].nil? && payload['startDate'].to_s.empty?
-      print_red_alert "--start-date is required"
+      print_red_alert "--log-range-start is required"
       return 1
     end
 
@@ -189,7 +189,7 @@ EOT
     if options[:start_date]
       t = parse_time(options[:start_date])
       if t.nil?
-        print_red_alert "Invalid --start-date value: #{options[:start_date]}"
+        print_red_alert "Invalid --log-range-start value: #{options[:start_date]}"
         return 1
       end
       payload['startDate'] = t.utc.iso8601
@@ -197,7 +197,7 @@ EOT
     if options[:end_date]
       t = parse_time(options[:end_date])
       if t.nil?
-        print_red_alert "Invalid --end-date value: #{options[:end_date]}"
+        print_red_alert "Invalid --log-range-end value: #{options[:end_date]}"
         return 1
       end
       payload['endDate'] = t.utc.iso8601
