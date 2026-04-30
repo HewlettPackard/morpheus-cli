@@ -3064,6 +3064,7 @@ class Morpheus::Cli::Clusters
           "Active" => lambda { |it| format_boolean(it['active']) },
           "Visibility" => lambda { |it| it['visibility'].nil? ? '' : it['visibility'].to_s.capitalize },
           "Tenants" => lambda { |it| it['tenants'].nil? ? '' : it['tenants'].collect {|it| it['name']}.join(', ') },
+          "Supports VM Secure Metadata" => lambda { |it| format_boolean(it['supportsVmSecureMetadata']) },
           "Cluster" => lambda { |it| cluster['name'] }
       }
       print_description_list(description_cols, datastore)
@@ -3233,6 +3234,9 @@ class Morpheus::Cli::Clusters
       opts.on('--active [on|off]', String, "Enable datastore") do |val|
         options[:active] = val.to_s == 'on' || val.to_s == 'true' || val.to_s == ''
       end
+      opts.on('--supports-vm-secure-metadata [on|off]', String, "Enable VM Secure Metadata support") do |val|
+        options[:supportsVmSecureMetadata] = val.to_s == 'on' || val.to_s == 'true' || val.to_s == ''
+      end
       add_perms_options(opts, options, ['plans', 'groupDefaults'])
       build_common_options(opts, options, [:options, :payload, :json, :dry_run, :remote])
       opts.footer = "Update a cluster datastore.\n" +
@@ -3264,6 +3268,7 @@ class Morpheus::Cli::Clusters
       else
         payload = {'datastore' => {}}
         payload['datastore']['active'] = options[:active].nil? ? (Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox', 'description' => 'Datastore Active', 'defaultValue' => true}], options[:options], @api_client))['active'] == 'on' : options[:active]
+        payload['datastore']['supportsVmSecureMetadata'] = options[:supportsVmSecureMetadata] unless options[:supportsVmSecureMetadata].nil?
 
         perms = prompt_permissions(options.merge({:available_plans => namespace_service_plans}), datastore['owner']['id'] == current_user['accountId'] ? ['plans', 'groupDefaults'] : ['plans', 'groupDefaults', 'visibility', 'tenants'])
         perms_payload = {}
