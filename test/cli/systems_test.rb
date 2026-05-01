@@ -160,3 +160,47 @@ class SystemsCommandTest < Test::Unit::TestCase
   end
 
 end
+
+# Integration tests for Systems CLI commands against a live Morpheus instance.
+# Requires a configured remote and login (uses MorpheusTest::TestCase).
+# Tests that return no records are skipped with a message rather than failing.
+if defined?(MorpheusTest::TestCase)
+  class SystemsLiveTest < MorpheusTest::TestCase
+
+    def test_systems_list_types
+      assert_execute %(systems list-types)
+    end
+
+    def test_systems_list_layouts
+      system_type = client.system_types.list({})['systemTypes']&.first
+      if system_type
+        assert_execute %(systems list-layouts "#{system_type['id']}")
+      else
+        puts "No system types found, skipping test `#{__method__}`"
+      end
+    end
+
+    def test_systems_list_layouts_with_components
+      system_types = client.system_types.list({})['systemTypes'] || []
+      type_with_components = system_types.find do |st|
+        layouts = client.system_types.list_layouts(st['id'], {})['systemTypeLayouts'] || []
+        layouts.any? { |l| l['componentTypes']&.any? }
+      end
+      if type_with_components
+        assert_execute %(systems list-layouts "#{type_with_components['id']}")
+      else
+        puts "No layouts with componentTypes found on this instance, skipping test `#{__method__}`"
+      end
+    end
+
+    def test_systems_list_layouts_json
+      system_type = client.system_types.list({})['systemTypes']&.first
+      if system_type
+        assert_execute %(systems list-layouts "#{system_type['id']}" --json)
+      else
+        puts "No system types found, skipping test `#{__method__}`"
+      end
+    end
+
+  end
+end

@@ -743,6 +743,20 @@ EOT
           print cyan
           print as_pretty_table(layouts, columns.upcase_keys!, options)
           print_results_pagination({size: layouts.size, total: (json_response['meta'] ? json_response['meta']['total'] : layouts.size)})
+          layouts.each do |layout|
+            component_types = layout['componentTypes'] || []
+            next if component_types.empty?
+            print_h2 "Components for #{layout['name']}", options
+            component_type_rows = component_types.collect do |ct|
+              {
+                id:       ct['id'],
+                code:     ct['code'],
+                name:     ct['name'],
+                category: ct['category']
+              }
+            end
+            print as_pretty_table(component_type_rows, [:id, :code, :name, :category], options)
+          end
         end
         print reset, "\n"
       end
