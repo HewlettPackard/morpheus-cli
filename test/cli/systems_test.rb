@@ -159,4 +159,129 @@ class SystemsCommandTest < Test::Unit::TestCase
     assert_equal 'ext-17', captured_rows[0][:external_id]
   end
 
+  def test_list_layouts_renders_component_types_when_present
+    command = Morpheus::Cli::Systems.new
+    h2_headers = []
+    table_calls = []
+    stub_interface = Object.new
+    stub_interface.define_singleton_method(:setopts) { |opts| }
+    stub_interface.define_singleton_method(:list_layouts) do |type_id, params|
+      {
+        'systemTypeLayouts' => [
+          {
+            'id'   => 10,
+            'name' => 'Demo Layout',
+            'code' => 'demo-layout',
+            'componentTypes' => [
+              {'id' => 1, 'code' => 'compute-node', 'name' => 'Compute Node', 'category' => 'compute'},
+              {'id' => 2, 'code' => 'storage-controller', 'name' => 'Storage Controller', 'category' => 'storage'}
+            ]
+          }
+        ]
+      }
+    end
+    command.define_singleton_method(:connect) do |options|
+      api_client = Object.new
+      api_client.define_singleton_method(:system_types) { stub_interface }
+      @api_client = api_client
+    end
+    command.define_singleton_method(:render_response) do |json_response, options, key, &block|
+      block.call if block
+    end
+    command.define_singleton_method(:print_h1) { |*args| }
+    command.define_singleton_method(:print_results_pagination) { |*args| }
+    command.define_singleton_method(:print) { |*args| }
+    command.define_singleton_method(:print_h2) do |header, *rest|
+      h2_headers << header
+    end
+    command.define_singleton_method(:as_pretty_table) do |rows, columns, options|
+      table_calls << {rows: rows, columns: columns}
+      "TABLE"
+    end
+
+    command.send(:list_layouts, ['2'])
+
+    assert_equal 1, h2_headers.size
+    assert_equal 'Components for Demo Layout', h2_headers[0]
+    component_table = table_calls.find { |t| t[:columns] == [:id, :code, :name, :category] }
+    assert_not_nil component_table
+    assert_equal 2, component_table[:rows].size
+    assert_equal 1, component_table[:rows][0][:id]
+    assert_equal 'compute-node', component_table[:rows][0][:code]
+    assert_equal 'Compute Node', component_table[:rows][0][:name]
+    assert_equal 'compute', component_table[:rows][0][:category]
+  end
+
+  def test_list_layouts_skips_component_section_when_no_component_types
+    command = Morpheus::Cli::Systems.new
+    h2_headers = []
+    stub_interface = Object.new
+    stub_interface.define_singleton_method(:setopts) { |opts| }
+    stub_interface.define_singleton_method(:list_layouts) do |type_id, params|
+      {
+        'systemTypeLayouts' => [
+          {'id' => 10, 'name' => 'Empty Layout', 'code' => 'empty-layout', 'componentTypes' => []},
+          {'id' => 11, 'name' => 'No Key Layout', 'code' => 'no-key-layout'}
+        ]
+      }
+    end
+    command.define_singleton_method(:connect) do |options|
+      api_client = Object.new
+      api_client.define_singleton_method(:system_types) { stub_interface }
+      @api_client = api_client
+    end
+    command.define_singleton_method(:render_response) do |json_response, options, key, &block|
+      block.call if block
+    end
+    command.define_singleton_method(:print_h1) { |*args| }
+    command.define_singleton_method(:print_results_pagination) { |*args| }
+    command.define_singleton_method(:print) { |*args| }
+    command.define_singleton_method(:print_h2) do |header, *rest|
+      h2_headers << header
+    end
+    command.define_singleton_method(:as_pretty_table) { |*args| "TABLE" }
+
+    command.send(:list_layouts, ['2'])
+
+    assert_equal 0, h2_headers.size
+  end
+
+  def test_list_layouts_preserves_summary_table_columns
+    command = Morpheus::Cli::Systems.new
+    captured_summary_rows = nil
+    stub_interface = Object.new
+    stub_interface.define_singleton_method(:setopts) { |opts| }
+    stub_interface.define_singleton_method(:list_layouts) do |type_id, params|
+      {
+        'systemTypeLayouts' => [
+          {'id' => 5, 'name' => 'My Layout', 'code' => 'my-layout', 'componentTypes' => []}
+        ]
+      }
+    end
+    command.define_singleton_method(:connect) do |options|
+      api_client = Object.new
+      api_client.define_singleton_method(:system_types) { stub_interface }
+      @api_client = api_client
+    end
+    command.define_singleton_method(:render_response) do |json_response, options, key, &block|
+      block.call if block
+    end
+    command.define_singleton_method(:print_h1) { |*args| }
+    command.define_singleton_method(:print_results_pagination) { |*args| }
+    command.define_singleton_method(:print) { |*args| }
+    command.define_singleton_method(:print_h2) { |*args| }
+    command.define_singleton_method(:as_pretty_table) do |rows, columns, options|
+      captured_summary_rows = rows if columns.is_a?(Hash)
+      "TABLE"
+    end
+
+    command.send(:list_layouts, ['1'])
+
+    assert_not_nil captured_summary_rows
+    assert_equal 1, captured_summary_rows.size
+    assert_equal 5, captured_summary_rows[0]['id']
+    assert_equal 'My Layout', captured_summary_rows[0]['name']
+    assert_equal 'my-layout', captured_summary_rows[0]['code']
+  end
+
 end
