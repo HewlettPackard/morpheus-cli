@@ -251,6 +251,18 @@ module Morpheus
           option_params.merge!(option_type['optionParams']) if option_type['optionParams']
           # option_params.merge!(extra_option_params) if extra_option_params && !extra_option_params.empty?
 
+          # flatten nested context values (e.g. customOptions.cloudId) to root level
+          # so cascading option source APIs receive expected params (cloudId, groupId, etc.)
+          flat_params = {}
+          option_params.each do |k, v|
+            if v.is_a?(Hash)
+              v.each do |inner_k, inner_v|
+                flat_params[inner_k] = inner_v unless inner_v.is_a?(Hash) || option_params.key?(inner_k)
+              end
+            end
+          end
+          option_params.merge!(flat_params) unless flat_params.empty?
+
           cur_namespace = options
           parent_context_map = context_map
           parent_ns = field_name
