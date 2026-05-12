@@ -1363,7 +1363,7 @@ class Morpheus::Cli::Instances
       opts.on('--refresh-until STATUS', String, "Refresh until a specified status is reached.") do |val|
         options[:refresh_until_status] = val.to_s.downcase
       end
-      opts.on('--include-tenants','--include-tenants', "Include sub tenant groups when finding instance by name") do
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant instances when finding instance by name") do
         options[:include_tenants] = true
       end
       # opts.on( nil, '--threshold', "Alias for --scaling" ) do
