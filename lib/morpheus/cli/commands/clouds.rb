@@ -160,6 +160,9 @@ class Morpheus::Cli::Clouds
     params = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[name]")
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant clouds when finding cloud by name") do
+        options[:include_tenants] = true
+      end
       build_standard_list_options(opts, options)
       opts.footer = "Get details about a cloud.\n" +
                     "[name] is required. This is the name or id of a cloud."
@@ -177,7 +180,7 @@ class Morpheus::Cli::Clouds
   def _get(id, params, options={})
     cloud = nil
     if id.to_s !~ /\A\d{1,}\Z/
-      cloud = find_cloud_by_name_or_id(id)
+      cloud = find_cloud_by_name_or_id(id, options[:include_tenants])
       id = cloud['id']
     end
     @clouds_interface.setopts(options)
@@ -1500,7 +1503,7 @@ EOT
     {
       "ID" => 'id',
       "Name" => 'name',
-      "Tenant" => lambda {|it| it['tenant'] ? it['tenant']['name'] : '' },
+      "Tenant" => lambda {|it| it['owner'] ? it['owner']['name'] : '' },
       "Type" => lambda {|it| it['zoneType'] ? it['zoneType']['name'] : '' },
       "Labels" => lambda {|it| format_list(it['labels'], '', 3) rescue '' },
       "Location" => 'location',

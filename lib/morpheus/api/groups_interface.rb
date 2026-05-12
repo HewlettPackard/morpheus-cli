@@ -9,7 +9,7 @@ class Morpheus::GroupsInterface < Morpheus::APIClient
     execute(opts)
   end
 
-  def get(options=nil)
+  def get(options=nil, params={})
     url = "#{@base_url}/api/groups"
     headers = { params: {}, authorization: "Bearer #{@access_token}" }
 
@@ -17,6 +17,7 @@ class Morpheus::GroupsInterface < Morpheus::APIClient
       headers[:params].merge!(options)
     elsif options.is_a?(Numeric)
       url = "#{@base_url}/api/groups/#{options}"
+      headers[:params] = params
     elsif options.is_a?(String)
       headers[:params]['name'] = options
     end

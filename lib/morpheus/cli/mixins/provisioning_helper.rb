@@ -225,11 +225,11 @@ module Morpheus::Cli::ProvisioningHelper
     end
   end
 
-  def find_instance_by_name_or_id(val)
+  def find_instance_by_name_or_id(val, include_tenants=false)
     if val.to_s =~ /\A\d{1,}\Z/
       return find_instance_by_id(val)
     else
-      return find_instance_by_name(val)
+      return find_instance_by_name(val, include_tenants)
     end
   end
 
@@ -247,14 +247,21 @@ module Morpheus::Cli::ProvisioningHelper
     end
   end
 
-  def find_instance_by_name(name)
-    json_results = instances_interface.list({name: name.to_s})
-    if json_results['instances'].empty?
+  def find_instance_by_name(name, include_tenants=false)
+    params = {name: name.to_s}
+    params['includeTenants'] = true if include_tenants
+    instances = instances_interface.list(params)['instances']
+    if instances.empty?
       print_red_alert "Instance not found by name #{name}"
       exit 1
+    elsif instances.size > 1
+      print_red_alert "Multiple Instances exist with the name '#{name}'"
+      puts_error as_pretty_table(instances, [:id, :name], {color:red})
+      print_red_alert "Try using ID instead"
+      print_error reset,"\n"
+      exit 1
     end
-    instance = json_results['instances'][0]
-    return instance
+    return instances[0]
   end
 
   def parse_instance_id_list(id_list)

@@ -89,6 +89,9 @@ class Morpheus::Cli::Groups
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do|opts|
       opts.banner = subcommand_usage("[name]")
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant groups when finding group by name") do
+        options[:include_tenants] = true
+      end
       build_standard_get_options(opts, options)
       opts.footer = <<-EOT
 Get details about a group.
@@ -104,25 +107,20 @@ EOT
     end
   end
 
-  def _get(arg, options={})
-    begin
-      if options[:dry_run]
-        @groups_interface.setopts(options)
-        if arg.to_s =~ /\A\d{1,}\Z/
-          print_dry_run @groups_interface.dry.get(arg.to_i)
-        else
-          print_dry_run @groups_interface.dry.list({name:arg})
-        end
-        return 0
-      end
-      group = find_group_by_name_or_id(arg)
-      @groups_interface.setopts(options)
-      #json_response = @groups_interface.get(group['id'])
-      json_response = {'group' => group}
-      
-      render_result = render_with_format(json_response, options)
-      return 0 if render_result
-
+  def _get(id, options={})
+    params = {}
+    group = nil
+    if id.to_s !~ /\A\d{1,}\Z/
+      group = find_group_by_name_or_id(id, options[:include_tenants])
+      id = group['id']
+    end
+    @groups_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @groups_interface.dry.get(id.to_i, params)
+      return
+    end
+    json_response = @groups_interface.get(id.to_i, params)
+    render_response(json_response, options, 'group') do
       group = json_response['group']
       group_stats = group['stats']
       # serverCounts moved to zone.stats.serverCounts

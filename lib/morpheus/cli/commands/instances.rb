@@ -1363,6 +1363,9 @@ class Morpheus::Cli::Instances
       opts.on('--refresh-until STATUS', String, "Refresh until a specified status is reached.") do |val|
         options[:refresh_until_status] = val.to_s.downcase
       end
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant groups when finding instance by name") do
+        options[:include_tenants] = true
+      end
       # opts.on( nil, '--threshold', "Alias for --scaling" ) do
       #   options[:include_scaling] = true
       # end
@@ -1395,7 +1398,7 @@ class Morpheus::Cli::Instances
     end
     instance = nil
     if id.to_s !~ /\A\d{1,}\Z/
-      instance = find_instance_by_name_or_id(id)
+      instance = find_instance_by_name_or_id(id, options[:include_tenants])
       return 1, "Instance not found by name #{id}" if instance.nil?
       id = instance['id']
     end

@@ -63,11 +63,11 @@ module Morpheus::Cli::InfrastructureHelper
     @subnet_types_interface
   end
 
-  def find_group_by_name_or_id(val)
+  def find_group_by_name_or_id(val, include_tenants=true)
     if val.to_s =~ /\A\d{1,}\Z/
       return find_group_by_id(val)
     else
-      return find_group_by_name(val)
+      return find_group_by_name(val, include_tenants)
     end
   end
 
@@ -85,21 +85,29 @@ module Morpheus::Cli::InfrastructureHelper
     end
   end
 
-  def find_group_by_name(name)
-    json_results = groups_interface.list({name: name})
-    if json_results['groups'].empty?
+  def find_group_by_name(name, include_tenants=false)
+    params = {name: name}
+    params['includeTenants'] = true if include_tenants
+    groups = groups_interface.list(params)['groups']
+    if groups.empty?
       print_red_alert "Group not found by name #{name}"
       exit 1
+    elsif groups.size > 1
+      print_red_alert "Multiple groups exist with the name '#{name}'"
+      print_error "\n"
+      puts_error as_pretty_table(groups, [:id, :name], {color:red})
+      print_red_alert "Try using ID instead"
+      print_error reset,"\n"
+      exit 1
     end
-    group = json_results['groups'][0]
-    return group
+    return groups[0]
   end
 
-  def find_cloud_by_name_or_id(val)
+  def find_cloud_by_name_or_id(val, include_tenants=false)
     if val.to_s =~ /\A\d{1,}\Z/
       return find_cloud_by_id(val)
     else
-      return find_cloud_by_name(val)
+      return find_cloud_by_name(val, include_tenants)
     end
   end
 
@@ -113,14 +121,22 @@ module Morpheus::Cli::InfrastructureHelper
     return cloud
   end
 
-  def find_cloud_by_name(name)
-    json_results = clouds_interface.list({name: name})
-    if json_results['zones'].empty?
+  def find_cloud_by_name(name, include_tenants=false)
+    params = {name: name}
+    params['includeTenants'] = true if include_tenants
+    clouds = clouds_interface.list(params)['zones']
+    if clouds.empty?
       print_red_alert "Cloud not found by name #{name}"
       exit 1
+    elsif clouds.size > 1
+      print_red_alert "Multiple clouds exist with the name '#{name}'"
+      print_error "\n"
+      puts_error as_pretty_table(clouds, [:id, :name], {color:red})
+      print_red_alert "Try using ID instead"
+      print_error reset,"\n"
+      exit 1
     end
-    cloud = json_results['zones'][0]
-    return cloud
+    return clouds[0]
   end
 
   def get_available_cloud_types(refresh=false, params = {})
