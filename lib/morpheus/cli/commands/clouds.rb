@@ -25,6 +25,8 @@ class Morpheus::Cli::Clouds
     @api_client = establish_remote_appliance_connection(opts)
     @clouds_interface = @api_client.clouds
     @groups_interface = @api_client.groups
+    @accounts_interface = @api_client.accounts
+    @account_users_interface = @api_client.account_users
     @active_group_id = Morpheus::Cli::Groups.active_groups[@appliance_name]
   end
 
@@ -49,6 +51,13 @@ class Morpheus::Cli::Clouds
       opts.on('--all-labels LABEL', String, "Filter by labels, must match all of the values") do |val|
         add_query_parameter(params, 'allLabels', parse_labels(val))
       end
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant clouds") do
+        options[:include_tenants] = true
+        params['includeTenants'] = true
+      end
+      opts.on('--tenant TENANT', String, "Tenant Name or ID" ) do |val|
+        options[:tenant] = val
+      end
       build_standard_list_options(opts, options)
       opts.footer = "List clouds."
     end
@@ -69,7 +78,14 @@ class Morpheus::Cli::Clouds
           params['groupId'] = group['id']
         end
       end
-
+      if options[:tenant]
+        account = find_account_by_name_or_id(options[:tenant])
+        if account.nil?
+          return 1, "Tenant not found by name or id: #{options[:tenant]}"
+        else
+          params['tenantId'] = account['id']
+        end
+      end
       params.merge!(parse_list_options(options))
       @clouds_interface.setopts(options)
       if options[:dry_run]
@@ -94,6 +110,9 @@ class Morpheus::Cli::Clouds
           print cyan,"No clouds found.",reset,"\n"
         else          
           columns = cloud_list_column_definitions(options).upcase_keys!
+          if !options[:include_tenants] && !options[:tenant]
+            columns.delete("Tenant")
+          end
           print as_pretty_table(clouds, columns, options)
           print_results_pagination(json_response)
         end
@@ -1481,6 +1500,7 @@ EOT
     {
       "ID" => 'id',
       "Name" => 'name',
+      "Tenant" => lambda {|it| it['tenant'] ? it['tenant']['name'] : '' },
       "Type" => lambda {|it| it['zoneType'] ? it['zoneType']['name'] : '' },
       "Labels" => lambda {|it| format_list(it['labels'], '', 3) rescue '' },
       "Location" => 'location',

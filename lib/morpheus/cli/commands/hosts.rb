@@ -113,6 +113,15 @@ class Morpheus::Cli::Hosts
       opts.on( '--created-by USER', "Created By User Username or ID" ) do |val|
         options[:created_by] = val
       end
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant servers. The default is true for this endpoint.") do
+        options[:include_tenants] = true
+        params['includeTenants'] = true
+      end
+      opts.add_hidden_option('--include-tenants')
+      opts.on('--no-include-tenants','--no-include-tenants', "Exclude sub tenant servers.") do
+        options[:include_tenants] = false
+        params['includeTenants'] = false
+      end
       opts.on( '--tenant TENANT', "Tenant Name or ID" ) do |val|
         options[:account] = val
       end
