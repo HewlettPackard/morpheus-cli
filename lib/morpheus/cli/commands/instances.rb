@@ -211,13 +211,16 @@ class Morpheus::Cli::Instances
       end
     end
 
-    tenant = nil
     if options[:tenant]
-      tenant = find_account_by_name_or_id(options[:tenant])
-      if tenant.nil?
-        return 1
+      if options[:tenant].to_s !~ /\A\d{1,}\Z/
+        account = find_account_by_name_or_id(options[:tenant])
+        if account.nil?
+          return 1, "Tenant not found by name: #{options[:tenant]}"
+        else
+          params['tenantId'] = account['id']
+        end
       else
-        params['tenantId'] = tenant['id']
+        params['tenantId'] = options[:tenant]
       end
     end
 
@@ -257,12 +260,6 @@ class Morpheus::Cli::Instances
       end
       if options[:owner]
         subtitles << "Created By: #{options[:owner]}"
-      end
-      if options[:tenant]
-        subtitles << "Tenant: #{options[:tenant]}".strip
-      end
-      if params['includeTenants']
-        subtitles << "Include Tenants: true".strip
       end
 
       subtitles += parse_list_subtitles(options)

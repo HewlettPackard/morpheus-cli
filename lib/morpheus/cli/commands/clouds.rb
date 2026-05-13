@@ -2,6 +2,7 @@ require 'morpheus/cli/cli_command'
 
 class Morpheus::Cli::Clouds
   include Morpheus::Cli::CliCommand
+  include Morpheus::Cli::AccountsHelper
   include Morpheus::Cli::InfrastructureHelper
   include Morpheus::Cli::ProvisioningHelper
   include Morpheus::Cli::WhoamiHelper
@@ -79,11 +80,15 @@ class Morpheus::Cli::Clouds
         end
       end
       if options[:tenant]
-        account = find_account_by_name_or_id(options[:tenant])
-        if account.nil?
-          return 1, "Tenant not found by name or id: #{options[:tenant]}"
+        if options[:tenant].to_s !~ /\A\d{1,}\Z/
+          account = find_account_by_name_or_id(options[:tenant])
+          if account.nil?
+            return 1, "Tenant not found by name: #{options[:tenant]}"
+          else
+            params['tenantId'] = account['id']
+          end
         else
-          params['tenantId'] = account['id']
+          params['tenantId'] = options[:tenant]
         end
       end
       params.merge!(parse_list_options(options))

@@ -54,11 +54,15 @@ class Morpheus::Cli::Groups
     verify_args!(args:args, optparse:optparse, count:0)
     connect(options)
     if options[:tenant]
-      account = find_account_by_name_or_id(options[:tenant])
-      if account.nil?
-        return 1
+      if options[:tenant].to_s !~ /\A\d{1,}\Z/
+        account = find_account_by_name_or_id(options[:tenant])
+        if account.nil?
+          return 1, "Tenant not found by name: #{options[:tenant]}"
+        else
+          params['tenantId'] = account['id']
+        end
       else
-        params['tenantId'] = account['id']
+        params['tenantId'] = options[:tenant]
       end
     end
     params.merge!(parse_list_options(options))
