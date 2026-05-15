@@ -726,11 +726,24 @@ class Morpheus::Cli::Workflows
         # prompt to workflow optionTypes for customOptions
         custom_options = nil
         if workflow['optionTypes'] && workflow['optionTypes'].size() > 0
+          # Clone to avoid mutating workflow data, and clear fieldContext so that
+          # accumulated results remain flat (not nested under 'customOptions') when
+          # passed as params to dependent option source API calls. If fieldContext
+          # were left as 'customOptions', option_params would be sent to the options
+          # API as customOptions[zoneId]=2 instead of the expected flat zoneId=2,
+          # causing dependent option lists (e.g. Resource Pools) to return empty.
           custom_option_types = workflow['optionTypes'].collect {|it|
-            it['fieldContext'] = 'customOptions'
-            it
+            ot = it.clone
+            ot.delete('fieldContext')
+            ot
           }
-          custom_options = Morpheus::Cli::OptionTypes.prompt(custom_option_types, options[:options], @api_client, {})
+          # Support both -O fieldName=value AND the legacy -O customOptions.fieldName=value syntax.
+          prompt_options = (options[:options] || {}).dup
+          if prompt_options['customOptions'].is_a?(Hash)
+            prompt_options.merge!(prompt_options.delete('customOptions'))
+          end
+          prompt_results = Morpheus::Cli::OptionTypes.prompt(custom_option_types, prompt_options, @api_client, {})
+          custom_options = {'customOptions' => prompt_results} unless prompt_results.empty?
         end
         job_payload = {}
         job_payload.deep_merge!(params)
