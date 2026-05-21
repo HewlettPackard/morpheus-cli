@@ -117,13 +117,8 @@ class Morpheus::Cli::Hosts
         options[:include_tenants] = true
         params['includeTenants'] = true
       end
-      opts.add_hidden_option('--include-tenants')
-      opts.on('--no-include-tenants','--no-include-tenants', "Exclude sub tenant servers.") do
-        options[:include_tenants] = false
-        params['includeTenants'] = false
-      end
       opts.on( '--tenant TENANT', "Tenant Name or ID" ) do |val|
-        options[:account] = val
+        options[:tenant] = val
       end
       opts.on('-l', '--labels LABEL', String, "Filter by labels, can match any of the values") do |val|
         add_query_parameter(params, 'labels', parse_labels(val))
@@ -163,8 +158,8 @@ class Morpheus::Cli::Hosts
     
     params.merge!(parse_list_options(options))
     account = nil
-    if options[:account]
-      account = find_account_by_name_or_id(options[:account])
+    if options[:tenant]
+      account = find_account_by_name_or_id(options[:tenant])
       if account.nil?
         return 1
       else
@@ -324,9 +319,9 @@ class Morpheus::Cli::Hosts
           "External Name" => :external_name,
           "Hostname" => :hostname,
           "Type" => :type,
+          "Cloud" => :cloud,
           "Owner" => :owner,
           "Tenant" => :tenant,
-          "Cloud" => :cloud,
           "Plan" => :plan,
           "IP" => :ip,
           "Private IP" => :internal_ip,
@@ -344,8 +339,6 @@ class Morpheus::Cli::Hosts
           columns.delete("Hostname")
           columns.delete("Plan")
           columns.delete("Private IP")
-          columns.delete("Owner")
-          columns.delete("Tenant")
           columns.delete("Power")
           columns.delete("Created")
           columns.delete("Updated")
@@ -378,7 +371,7 @@ class Morpheus::Cli::Hosts
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[options]")
       opts.on( '--tenant TENANT', "Tenant Name or ID" ) do |val|
-        options[:account] = val
+        options[:tenant] = val
       end
       opts.on( '-g', '--group GROUP', "Group Name or ID" ) do |val|
         options[:group] = val
@@ -443,8 +436,8 @@ class Morpheus::Cli::Hosts
     begin
       params.merge!(parse_list_options(options))
       account = nil
-      if options[:account]
-        account = find_account_by_name_or_id(options[:account])
+      if options[:tenant]
+        account = find_account_by_name_or_id(options[:tenant])
         if account.nil?
           return 1
         else
