@@ -514,7 +514,7 @@ class Morpheus::Cli::Hosts
       opts.on('--refresh-until STATUS', String, "Refresh until a specified status is reached.") do |val|
         options[:refresh_until_status] = val.to_s.downcase
       end
-      opts.on('--include-tenants','--include-tenants', "Include sub tenant instances when finding instance by name") do
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant servers when finding server by name") do
         options[:include_tenants] = true
       end
       build_standard_get_options(opts, options)
