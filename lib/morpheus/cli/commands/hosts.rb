@@ -514,6 +514,9 @@ class Morpheus::Cli::Hosts
       opts.on('--refresh-until STATUS', String, "Refresh until a specified status is reached.") do |val|
         options[:refresh_until_status] = val.to_s.downcase
       end
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant instances when finding instance by name") do
+        options[:include_tenants] = true
+      end
       build_standard_get_options(opts, options)
     end
     optparse.parse!(args)
@@ -542,7 +545,7 @@ class Morpheus::Cli::Hosts
     if arg.to_s =~ /\A\d{1,}\Z/
       json_response = @servers_interface.get(arg.to_i)
     else
-      server = find_host_by_name_or_id(arg)
+      server = find_host_by_name_or_id(arg, options[:include_tenants])
       json_response = @servers_interface.get(server['id'])
       # json_response = {"server" => server} need stats
     end
@@ -2747,8 +2750,10 @@ EOT
     end
   end
 
-  def find_host_by_name(name)
-    results = @servers_interface.list({name: name})
+  def find_host_by_name(name, include_tenants=false)
+    params = {name: name.to_s}
+    params['includeTenants'] = true if include_tenants
+    results = @servers_interface.list(params)
     if results['servers'].empty?
       print_red_alert "Server not found by name #{name}"
       exit 1
@@ -2761,11 +2766,11 @@ EOT
     return results['servers'][0]
   end
 
-  def find_host_by_name_or_id(val)
+  def find_host_by_name_or_id(val, include_tenants=false)
     if val.to_s =~ /\A\d{1,}\Z/
       return find_host_by_id(val)
     else
-      return find_host_by_name(val)
+      return find_host_by_name(val, include_tenants)
     end
   end
 
