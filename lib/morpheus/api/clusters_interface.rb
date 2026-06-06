@@ -389,5 +389,29 @@ class Morpheus::ClustersInterface < Morpheus::APIClient
     headers = { :params => params, :authorization => "Bearer #{@access_token}", 'Content-Type' => 'application/json' }
     execute(method: :delete, url: url, headers: headers)
   end
+
+  def available_updates(id, params={})
+    url = "#{base_path}/#{id}/available-updates"
+    headers = { params: params, authorization: "Bearer #{@access_token}" }
+    execute(method: :get, url: url, headers: headers)
+  end
+
+  def list_updates(id, update_id, params={})
+    url = "#{base_path}/#{id}/available-updates"
+    headers = { params: params, authorization: "Bearer #{@access_token}" }
+    execute(method: :get, url: url, headers: headers)
+  end
+  
+  def get_update(id, update_id, params={})
+    url = "#{base_path}/#{id}/available-updates/#{update_id}"
+    headers = { params: params, authorization: "Bearer #{@access_token}" }
+    execute(method: :get, url: url, headers: headers)
+  end
+
+  def execute_update(id, payload)
+    url = "#{base_path}/#{id}/execute-update"
+    headers = { :authorization => "Bearer #{@access_token}", 'Content-Type' => 'application/json' }
+    execute(method: :post, url: url, headers: headers, payload: payload.to_json)
+  end
   
 end
