@@ -113,8 +113,12 @@ class Morpheus::Cli::Hosts
       opts.on( '--created-by USER', "Created By User Username or ID" ) do |val|
         options[:created_by] = val
       end
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant servers. The default is true for this endpoint.") do
+        options[:include_tenants] = true
+        params['includeTenants'] = true
+      end
       opts.on( '--tenant TENANT', "Tenant Name or ID" ) do |val|
-        options[:account] = val
+        options[:tenant] = val
       end
       opts.on('-l', '--labels LABEL', String, "Filter by labels, can match any of the values") do |val|
         add_query_parameter(params, 'labels', parse_labels(val))
@@ -154,8 +158,8 @@ class Morpheus::Cli::Hosts
     
     params.merge!(parse_list_options(options))
     account = nil
-    if options[:account]
-      account = find_account_by_name_or_id(options[:account])
+    if options[:tenant]
+      account = find_account_by_name_or_id(options[:tenant])
       if account.nil?
         return 1
       else
@@ -315,9 +319,9 @@ class Morpheus::Cli::Hosts
           "External Name" => :external_name,
           "Hostname" => :hostname,
           "Type" => :type,
+          "Cloud" => :cloud,
           "Owner" => :owner,
           "Tenant" => :tenant,
-          "Cloud" => :cloud,
           "Plan" => :plan,
           "IP" => :ip,
           "Private IP" => :internal_ip,
@@ -335,8 +339,6 @@ class Morpheus::Cli::Hosts
           columns.delete("Hostname")
           columns.delete("Plan")
           columns.delete("Private IP")
-          columns.delete("Owner")
-          columns.delete("Tenant")
           columns.delete("Power")
           columns.delete("Created")
           columns.delete("Updated")
@@ -369,7 +371,7 @@ class Morpheus::Cli::Hosts
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[options]")
       opts.on( '--tenant TENANT', "Tenant Name or ID" ) do |val|
-        options[:account] = val
+        options[:tenant] = val
       end
       opts.on( '-g', '--group GROUP', "Group Name or ID" ) do |val|
         options[:group] = val
@@ -434,8 +436,8 @@ class Morpheus::Cli::Hosts
     begin
       params.merge!(parse_list_options(options))
       account = nil
-      if options[:account]
-        account = find_account_by_name_or_id(options[:account])
+      if options[:tenant]
+        account = find_account_by_name_or_id(options[:tenant])
         if account.nil?
           return 1
         else
@@ -512,6 +514,9 @@ class Morpheus::Cli::Hosts
       opts.on('--refresh-until STATUS', String, "Refresh until a specified status is reached.") do |val|
         options[:refresh_until_status] = val.to_s.downcase
       end
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant servers when finding server by name") do
+        options[:include_tenants] = true
+      end
       build_standard_get_options(opts, options)
     end
     optparse.parse!(args)
@@ -540,7 +545,7 @@ class Morpheus::Cli::Hosts
     if arg.to_s =~ /\A\d{1,}\Z/
       json_response = @servers_interface.get(arg.to_i)
     else
-      server = find_host_by_name_or_id(arg)
+      server = find_host_by_name_or_id(arg, options[:include_tenants])
       json_response = @servers_interface.get(server['id'])
       # json_response = {"server" => server} need stats
     end
@@ -2745,8 +2750,10 @@ EOT
     end
   end
 
-  def find_host_by_name(name)
-    results = @servers_interface.list({name: name})
+  def find_host_by_name(name, include_tenants=false)
+    params = {name: name.to_s}
+    params['includeTenants'] = true if include_tenants
+    results = @servers_interface.list(params)
     if results['servers'].empty?
       print_red_alert "Server not found by name #{name}"
       exit 1
@@ -2759,11 +2766,11 @@ EOT
     return results['servers'][0]
   end
 
-  def find_host_by_name_or_id(val)
+  def find_host_by_name_or_id(val, include_tenants=false)
     if val.to_s =~ /\A\d{1,}\Z/
       return find_host_by_id(val)
     else
-      return find_host_by_name(val)
+      return find_host_by_name(val, include_tenants)
     end
   end
 

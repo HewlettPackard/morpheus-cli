@@ -1485,7 +1485,12 @@ module Morpheus
       # returns Array of subtitles as strings in the format ["Phrase: blah", "Max: 100"]
       def parse_list_subtitles(options={})
         subtitles = []
-        list_params = {}
+        if options[:tenant]
+          subtitles << "Tenant: #{options[:tenant]}".strip
+        end
+        if options[:include_tenants]
+          subtitles << "Include Tenants: true".strip
+        end
         [:phrase, :offset, :max, :sort, :direction, :lastUpdated].each do |k|
           if options.key?(k)
             subtitles << "#{k.to_s}: #{options[k]}"

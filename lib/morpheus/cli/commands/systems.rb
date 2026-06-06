@@ -6,7 +6,19 @@ class Morpheus::Cli::Systems
 
   set_command_name :systems
   set_command_description "View and manage systems."
-  register_subcommands :list, :get, :add, :update, :remove, :'add-uninitialized', {:'initialize' => 'exec_initialize'}, {:'validate' => 'exec_validate'}
+  register_subcommands :list, :get, :add, :update, :remove, :'add-uninitialized', {:'initialize' => 'exec_initialize'}, {:'validate' => 'exec_validate'},
+                       {:'list-types' => :list_types},
+                       {:'list-layouts' => :list_layouts},
+                       {:'list-available-server-updates' => :list_available_server_updates},
+                       {:'apply-server-update' => :apply_server_update},
+                       {:'list-available-storage-updates' => :list_available_storage_updates},
+				       {:'apply-storage-update' => :apply_storage_update},
+				       {:'list-available-network-updates' => :list_available_network_updates},
+				       {:'apply-network-update' => :apply_network_update},
+                       {:'list-available-network-server-updates' => :list_available_network_server_updates},
+			       {:'apply-network-server-update' => :apply_network_server_update},
+			       {:'list-available-cluster-updates' => :list_available_cluster_updates},
+			       {:'apply-cluster-update' => :apply_cluster_update}
 
   protected
 
@@ -17,6 +29,11 @@ class Morpheus::Cli::Systems
 
   def system_list_key
     'systems'
+  end
+
+  # Required so find_by_name_or_id(:servers, id) resolves the lowercase 'server' key
+  def server_object_key
+    'server'
   end
 
   def system_list_column_definitions(options)
@@ -52,12 +69,27 @@ class Morpheus::Cli::Systems
       print cyan
       print_description_list(rest_column_definitions(options), record, options)
       print reset,"\n"
+      components = record['components'] || []
+      if components.any?
+      	print_h2 "Components (#{components.size})", options
+      	component_rows = components.collect do |component|
+      		{
+      			id: component['id'],
+      			name: component['name'],
+      			type_code: component.dig('type', 'code'),
+      			type_name: component.dig('type', 'name'),
+      			external_id: component['externalId']
+      		}
+      	end
+      	print as_pretty_table(component_rows, [:id, :name, :type_code, :type_name, :external_id], options)
+      end
     end
   end
 
   def add(args)
     options = {}
     params = {}
+    components = []
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[name]")
       opts.on('--name NAME', String, "System Name") do |val|
@@ -72,6 +104,12 @@ class Morpheus::Cli::Systems
       opts.on('--layout LAYOUT', String, "System Layout ID or name") do |val|
         params['layout'] = val
       end
+      opts.on('--component JSON', String, "Component JSON (can be repeated). e.g. '{\"typeCode\":\"compute-node\",\"name\":\"CN-1\"}'") do |val|
+        components << JSON.parse(val)
+      end
+      opts.on('--components JSON', String, "Components JSON array") do |val|
+        components.concat(JSON.parse(val))
+      end
       build_standard_add_options(opts, options)
       opts.footer = "Create a new system.\n[name] is optional and can be passed as the first argument."
     end
@@ -84,6 +122,7 @@ class Morpheus::Cli::Systems
       payload[rest_object_key] ||= {}
       payload[rest_object_key].deep_merge!(params) unless params.empty?
       payload[rest_object_key]['name'] ||= args[0] if args[0]
+      payload[rest_object_key]['components'] = components unless components.empty?
     else
       system_payload = {}
 
@@ -145,6 +184,7 @@ class Morpheus::Cli::Systems
         end
       end
 
+      system_payload['components'] = components unless components.empty?
       payload = {rest_object_key => system_payload}
     end
 
@@ -535,17 +575,38 @@ EOT
   def update(args)
     options = {}
     params = {}
+    components = []
+    components_specified = false
     optparse = Morpheus::Cli::OptionParser.new do |opts|
-      opts.banner = subcommand_usage("[system] --name --description")
+      opts.banner = subcommand_usage("[system]")
       opts.on("--name NAME", String, "Updates System Name") do |val|
         params['name'] = val.to_s
       end
       opts.on("--description [TEXT]", String, "Updates System Description") do |val|
         params['description'] = val.to_s
       end
+      opts.on('--enabled [on|off]', String, "Set whether the system is enabled") do |val|
+        params['enabled'] = val.to_s
+      end
+      opts.on('--externalId ID', String, "Set the external ID") do |val|
+        params['externalId'] = val.to_s
+      end
+      opts.on('--config JSON', String, "Set config JSON") do |val|
+        params['config'] = JSON.parse(val)
+      end
+      opts.on('--component JSON', String, "Component JSON (can be repeated). Pass the full desired component set when using component updates.") do |val|
+        components_specified = true
+        components << JSON.parse(val)
+      end
+      opts.on('--components JSON', String, "Components JSON array. This should be the full desired final component list.") do |val|
+        components_specified = true
+        components.concat(JSON.parse(val))
+      end
       build_standard_update_options(opts, options, [:find_by_name])
       opts.footer = <<-EOT
 Update an existing system.
+If system.components is supplied, it is authoritative: omitted components will be removed.
+Omit the components key entirely to leave components unchanged.
 [system] is required. This is the name or id of a system.
 EOT
     end
@@ -567,6 +628,9 @@ EOT
     params.booleanize!
 
     payload = parse_payload(options) || {rest_object_key => params}
+    payload[rest_object_key] ||= {}
+    payload[rest_object_key].deep_merge!(params) unless params.empty?
+    payload[rest_object_key]['components'] = components if components_specified
     if payload[rest_object_key].nil? || payload[rest_object_key].empty?
       raise_command_error "Specify at least one option to update.\n#{optparse}"
     end
@@ -596,4 +660,544 @@ EOT
     items = result ? (result['systemTypeLayouts'] || result[:systemTypeLayouts] || result['layouts'] || result[:layouts] || []) : []
     items.map { |l| {'id' => l['id'] || l[:id], 'name' => l['name'] || l[:name], 'value' => (l['id'] || l[:id]).to_s, 'code' => l['code'] || l[:code], 'componentTypes' => l['componentTypes'] || l[:componentTypes] || []} }
   end
+
+  def list_types(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage()
+      build_standard_list_options(opts, options)
+      opts.footer = "List available system types."
+    end
+    optparse.parse!(args)
+    connect(options)
+    begin
+      params = {}
+      params.merge!(parse_list_options(options))
+      @system_types_interface = @api_client.system_types
+      @system_types_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @system_types_interface.dry.list(params)
+        return 0
+      end
+      json_response = @system_types_interface.list(params)
+      system_types = json_response['systemTypes'] || []
+      render_response(json_response, options, 'systemTypes') do
+        print_h1 "System Types", [], options
+        if system_types.empty?
+          print cyan, "No system types found.", reset, "\n"
+        else
+          columns = {
+            "ID"   => 'id',
+            "Name" => 'name',
+            "Code" => 'code',
+          }
+          print cyan
+          print as_pretty_table(system_types, columns.upcase_keys!, options)
+          print_results_pagination({size: system_types.size, total: (json_response['meta'] ? json_response['meta']['total'] : system_types.size)})
+        end
+        print reset, "\n"
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def list_layouts(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[type]")
+      build_standard_list_options(opts, options)
+      opts.footer = <<-EOT
+List available layouts for a system type.
+[type] is required. This is the id of a system type.
+Use 'systems list-types' to find the type id.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:1)
+    connect(options)
+    begin
+      type_id = args[0].to_i
+      params = {}
+      params.merge!(parse_list_options(options))
+      @system_types_interface = @api_client.system_types
+      @system_types_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @system_types_interface.dry.list_layouts(type_id, params)
+        return 0
+      end
+      json_response = @system_types_interface.list_layouts(type_id, params)
+      layouts = json_response['systemTypeLayouts'] || []
+      render_response(json_response, options, 'systemTypeLayouts') do
+        print_h1 "System Type Layouts", [], options
+        if layouts.empty?
+          print cyan, "No layouts found.", reset, "\n"
+        else
+          columns = {
+            "ID"   => 'id',
+            "Name" => 'name',
+            "Code" => 'code',
+          }
+          print cyan
+          print as_pretty_table(layouts, columns.upcase_keys!, options)
+          print_results_pagination({size: layouts.size, total: (json_response['meta'] ? json_response['meta']['total'] : layouts.size)})
+          layouts.each do |layout|
+            component_types = layout['componentTypes'] || []
+            next if component_types.empty?
+            print_h2 "Components for #{layout['name']}", options
+            component_type_rows = component_types.collect do |ct|
+              {
+                id:       ct['id'],
+                code:     ct['code'],
+                name:     ct['name'],
+                category: ct['category']
+              }
+            end
+            print as_pretty_table(component_type_rows, [:id, :code, :name, :category], options)
+          end
+        end
+        print reset, "\n"
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def list_available_server_updates(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system] [server]")
+      build_standard_list_options(opts, options)
+      opts.footer = <<-EOT
+List available update definitions for a compute server component of a system.
+[system] is required. This is the name or id of a system.
+[server] is required. This is the name or id of the compute server.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:2)
+    connect(options)
+    begin
+      system = find_by_name_or_id(:systems, args[0])
+      return 1 if system.nil?
+      server = find_by_name_or_id(:servers, args[1])
+      return 1 if server.nil?
+      params = {}
+      params.merge!(parse_list_options(options))
+      @systems_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @systems_interface.dry.list_compute_server_update_definitions(system['id'], server['id'], params)
+        return
+      end
+      json_response = @systems_interface.list_compute_server_update_definitions(system['id'], server['id'], params)
+      update_definitions = json_response['updateDefinitions']
+      render_response(json_response, options, 'updateDefinitions') do
+        print_h1 "Available Server Updates: #{system['name']} / #{server['name']}", [], options
+        if update_definitions.nil? || update_definitions.empty?
+          print cyan, "No update definitions found.", reset, "\n"
+        else
+          columns = {
+            "ID"          => 'id',
+            "Name"        => 'name',
+            "Version"     => 'updateVersion',
+            "Severity"    => 'severity',
+            "Type"        => 'type',
+            "Reboot"      => lambda {|it| format_boolean(it['requiresReboot']) },
+            "Rollback"    => lambda {|it| format_boolean(it['supportsRollback']) },
+            "Released"    => lambda {|it| it['updateReleaseDate'] ? format_local_dt(it['updateReleaseDate']) : '' },
+          }
+          print cyan
+          print as_pretty_table(update_definitions, columns.upcase_keys!, options)
+          print_results_pagination({size: update_definitions.size, total: (json_response['meta'] ? json_response['meta']['total'] : update_definitions.size)})
+        end
+        print reset, "\n"
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def apply_server_update(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system] [server] [updateDefinitionId]")
+      opts.on('--dry-run-update', "Execute as a dry run — passes dryRun:true to the server, no changes applied.") do
+        options[:dry_run_update] = true
+      end
+      build_standard_update_options(opts, options)
+      opts.footer = <<-EOT
+Apply an update definition to a compute server component of a system.
+[system] is required. This is the name or id of a system.
+[server] is required. This is the name or id of the compute server.
+[updateDefinitionId] is required. This is the id of the update definition.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:3)
+    connect(options)
+    begin
+      system = find_by_name_or_id(:systems, args[0])
+      return 1 if system.nil?
+      server = find_by_name_or_id(:servers, args[1])
+      return 1 if server.nil?
+      update_definition_id = args[2]
+      payload = {}
+      payload['dryRun'] = true if options[:dry_run_update]
+      payload.deep_merge!(parse_passed_options(options))
+      params = {}
+      @systems_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @systems_interface.dry.apply_compute_server_update_definition(system['id'], server['id'], update_definition_id, payload, params)
+        return
+      end
+      json_response = @systems_interface.apply_compute_server_update_definition(system['id'], server['id'], update_definition_id, payload, params)
+      render_response(json_response, options) do
+        print_green_success "Update operation #{json_response['updateOperation']['id']} queued for server #{server['name']} on system #{system['name']}."
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def list_available_storage_updates(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system] [storage-server]")
+      build_standard_list_options(opts, options)
+      opts.footer = <<-EOT
+List available update definitions for a storage server component of a system.
+[system] is required. This is the name or id of a system.
+[storage-server] is required. This is the name or id of the storage server.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:2)
+    connect(options)
+    begin
+      system = find_by_name_or_id(:systems, args[0])
+      return 1 if system.nil?
+      storage_server = find_by_name_or_id(:storage_servers, args[1])
+      return 1 if storage_server.nil?
+      params = {}
+      params.merge!(parse_list_options(options))
+      @systems_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @systems_interface.dry.list_storage_server_update_definitions(system['id'], storage_server['id'], params)
+        return
+      end
+      json_response = @systems_interface.list_storage_server_update_definitions(system['id'], storage_server['id'], params)
+      update_definitions = json_response['updateDefinitions']
+      render_response(json_response, options, 'updateDefinitions') do
+        print_h1 "Available Storage Updates: #{system['name']} / #{storage_server['name']}", [], options
+        if update_definitions.nil? || update_definitions.empty?
+          print cyan, "No update definitions found.", reset, "\n"
+        else
+          columns = {
+            "ID"          => 'id',
+            "Name"        => 'name',
+            "Version"     => 'updateVersion',
+            "Severity"    => 'severity',
+            "Type"        => 'type',
+            "Reboot"      => lambda {|it| format_boolean(it['requiresReboot']) },
+            "Rollback"    => lambda {|it| format_boolean(it['supportsRollback']) },
+            "Released"    => lambda {|it| it['updateReleaseDate'] ? format_local_dt(it['updateReleaseDate']) : '' },
+          }
+          print cyan
+          print as_pretty_table(update_definitions, columns.upcase_keys!, options)
+          print_results_pagination({size: update_definitions.size, total: (json_response['meta'] ? json_response['meta']['total'] : update_definitions.size)})
+        end
+        print reset, "\n"
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def apply_storage_update(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system] [storage-server] [updateDefinitionId]")
+      opts.on('--dry-run-update', "Execute as a dry run — passes dryRun:true to the server, no changes applied.") do
+        options[:dry_run_update] = true
+      end
+      build_standard_update_options(opts, options)
+      opts.footer = <<-EOT
+Apply an update definition to a storage server component of a system.
+[system] is required. This is the name or id of a system.
+[storage-server] is required. This is the name or id of the storage server.
+[updateDefinitionId] is required. This is the id of the update definition.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:3)
+    connect(options)
+    begin
+      system = find_by_name_or_id(:systems, args[0])
+      return 1 if system.nil?
+      storage_server = find_by_name_or_id(:storage_servers, args[1])
+      return 1 if storage_server.nil?
+      update_definition_id = args[2]
+      payload = {}
+      payload['dryRun'] = true if options[:dry_run_update]
+      payload.deep_merge!(parse_passed_options(options))
+      params = {}
+      @systems_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @systems_interface.dry.apply_storage_server_update_definition(system['id'], storage_server['id'], update_definition_id, payload, params)
+        return
+      end
+      json_response = @systems_interface.apply_storage_server_update_definition(system['id'], storage_server['id'], update_definition_id, payload, params)
+      render_response(json_response, options) do
+        print_green_success "Update operation #{json_response['updateOperation']['id']} queued for storage server #{storage_server['name']} on system #{system['name']}."
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def list_available_network_server_updates(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system] [network-server]")
+      build_standard_list_options(opts, options)
+      opts.footer = <<-EOT
+List available update definitions for a network server component of a system.
+[system] is required. This is the name or id of a system.
+[network-server] is required. This is the name or id of the network server.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:2)
+    connect(options)
+    begin
+      system = find_by_name_or_id(:systems, args[0])
+      return 1 if system.nil?
+      network_server = find_by_name_or_id(:network_servers, args[1])
+      return 1 if network_server.nil?
+      params = {}
+      params.merge!(parse_list_options(options))
+      @systems_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @systems_interface.dry.list_network_server_update_definitions(system['id'], network_server['id'], params)
+        return
+      end
+      json_response = @systems_interface.list_network_server_update_definitions(system['id'], network_server['id'], params)
+      update_definitions = json_response['updateDefinitions']
+      render_response(json_response, options, 'updateDefinitions') do
+        print_h1 "Available Network Server Updates: #{system['name']} / #{network_server['name']}", [], options
+        if update_definitions.nil? || update_definitions.empty?
+          print cyan, "No update definitions found.", reset, "\n"
+        else
+          columns = {
+            "ID"          => 'id',
+            "Name"        => 'name',
+            "Version"     => 'updateVersion',
+            "Severity"    => 'severity',
+            "Type"        => 'type',
+            "Reboot"      => lambda {|it| format_boolean(it['requiresReboot']) },
+            "Rollback"    => lambda {|it| format_boolean(it['supportsRollback']) },
+            "Released"    => lambda {|it| it['updateReleaseDate'] ? format_local_dt(it['updateReleaseDate']) : '' },
+          }
+          print cyan
+          print as_pretty_table(update_definitions, columns.upcase_keys!, options)
+          print_results_pagination({size: update_definitions.size, total: (json_response['meta'] ? json_response['meta']['total'] : update_definitions.size)})
+        end
+        print reset, "\n"
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def list_available_network_updates(args)
+    list_available_network_server_updates(args)
+  end
+
+  def apply_network_server_update(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system] [network-server] [updateDefinitionId]")
+      opts.on('--dry-run-update', "Execute as a dry run — passes dryRun:true to the server, no changes applied.") do
+        options[:dry_run_update] = true
+      end
+      build_standard_update_options(opts, options)
+      opts.footer = <<-EOT
+Apply an update definition to a network server component of a system.
+[system] is required. This is the name or id of a system.
+[network-server] is required. This is the name or id of the network server.
+[updateDefinitionId] is required. This is the id of the update definition.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:3)
+    connect(options)
+    begin
+      system = find_by_name_or_id(:systems, args[0])
+      return 1 if system.nil?
+      network_server = find_by_name_or_id(:network_servers, args[1])
+      return 1 if network_server.nil?
+      update_definition_id = args[2]
+      payload = {}
+      payload['dryRun'] = true if options[:dry_run_update]
+      payload.deep_merge!(parse_passed_options(options))
+      params = {}
+      @systems_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @systems_interface.dry.apply_network_server_update_definition(system['id'], network_server['id'], update_definition_id, payload, params)
+        return
+      end
+      json_response = @systems_interface.apply_network_server_update_definition(system['id'], network_server['id'], update_definition_id, payload, params)
+      render_response(json_response, options) do
+        print_green_success "Update operation #{json_response['updateOperation']['id']} queued for network server #{network_server['name']} on system #{system['name']}."
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def apply_network_update(args)
+    apply_network_server_update(args)
+  end
+
+  def list_available_cluster_updates(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system] [cluster]")
+      build_standard_list_options(opts, options)
+      opts.footer = <<-EOT
+List available update definitions for a cluster component of a system.
+[system] is required. This is the name or id of a system.
+[cluster] is required. This is the name or id of the cluster.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:2)
+    connect(options)
+    begin
+      system = find_by_name_or_id(:systems, args[0])
+      return 1 if system.nil?
+      cluster = find_cluster_by_name_or_id(args[1])
+      return 1 if cluster.nil?
+      params = {}
+      params.merge!(parse_list_options(options))
+      @systems_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @systems_interface.dry.list_cluster_update_definitions(system['id'], cluster['id'], params)
+        return
+      end
+      json_response = @systems_interface.list_cluster_update_definitions(system['id'], cluster['id'], params)
+      update_definitions = json_response['updateDefinitions']
+      render_response(json_response, options, 'updateDefinitions') do
+        print_h1 "Available Cluster Updates: #{system['name']} / #{cluster['name']}", [], options
+        if update_definitions.nil? || update_definitions.empty?
+          print cyan, "No update definitions found.", reset, "\n"
+        else
+          columns = {
+            "ID"          => 'id',
+            "Name"        => 'name',
+            "Version"     => 'updateVersion',
+            "Severity"    => 'severity',
+            "Type"        => 'type',
+            "Reboot"      => lambda {|it| format_boolean(it['requiresReboot']) },
+            "Rollback"    => lambda {|it| format_boolean(it['supportsRollback']) },
+            "Released"    => lambda {|it| it['updateReleaseDate'] ? format_local_dt(it['updateReleaseDate']) : '' },
+          }
+          print cyan
+          print as_pretty_table(update_definitions, columns.upcase_keys!, options)
+          print_results_pagination({size: update_definitions.size, total: (json_response['meta'] ? json_response['meta']['total'] : update_definitions.size)})
+        end
+        print reset, "\n"
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def apply_cluster_update(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[system] [cluster] [updateDefinitionId]")
+      opts.on('--dry-run-update', "Execute as a dry run — passes dryRun:true to the server, no changes applied.") do
+        options[:dry_run_update] = true
+      end
+      build_standard_update_options(opts, options)
+      opts.footer = <<-EOT
+Apply an update definition to a cluster component of a system.
+[system] is required. This is the name or id of a system.
+[cluster] is required. This is the name or id of the cluster.
+[updateDefinitionId] is required. This is the id of the update definition.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:3)
+    connect(options)
+    begin
+      system = find_by_name_or_id(:systems, args[0])
+      return 1 if system.nil?
+      cluster = find_cluster_by_name_or_id(args[1])
+      return 1 if cluster.nil?
+      update_definition_id = args[2]
+      payload = {}
+      payload['dryRun'] = true if options[:dry_run_update]
+      payload.deep_merge!(parse_passed_options(options))
+      params = {}
+      @systems_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @systems_interface.dry.apply_cluster_update_definition(system['id'], cluster['id'], update_definition_id, payload, params)
+        return
+      end
+      json_response = @systems_interface.apply_cluster_update_definition(system['id'], cluster['id'], update_definition_id, payload, params)
+      render_response(json_response, options) do
+        print_green_success "Update operation #{json_response['updateOperation']['id']} queued for cluster #{cluster['name']} on system #{system['name']}."
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  private
+
+  def find_cluster_by_name_or_id(val)
+    if val.to_s =~ /\A\d{1,}\Z/
+      json_result = @api_client.clusters.get(val.to_i)
+      cluster = json_result['cluster']
+      if cluster.nil?
+        print_red_alert "Cluster not found by id #{val}"
+        return nil
+      end
+      cluster
+    else
+      json_result = @api_client.clusters.list({name: val})
+      clusters = json_result['clusters']
+      if clusters.nil? || clusters.empty?
+        print_red_alert "Cluster not found by name '#{val}'"
+        return nil
+      elsif clusters.size > 1
+        print_red_alert "#{clusters.size} clusters found by name '#{val}'. Use the id instead."
+        return nil
+      end
+      clusters.first
+    end
+  end
+
 end

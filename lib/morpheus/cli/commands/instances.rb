@@ -150,6 +150,13 @@ class Morpheus::Cli::Instances
         options[:details] = true
         params['details'] = true # get more data from server this way
       end
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant instances") do
+        options[:include_tenants] = true
+        params['includeTenants'] = true
+      end
+      opts.on('--tenant TENANT', String, "Tenant Name or ID" ) do |val|
+        options[:tenant] = val
+      end
       build_standard_list_options(opts, options)
       opts.footer = "List instances."
     end
@@ -204,6 +211,19 @@ class Morpheus::Cli::Instances
       end
     end
 
+    if options[:tenant]
+      if options[:tenant].to_s !~ /\A\d{1,}\Z/
+        account = find_account_by_name_or_id(options[:tenant])
+        if account.nil?
+          return 1, "Tenant not found by name: #{options[:tenant]}"
+        else
+          params['tenantId'] = account['id']
+        end
+      else
+        params['tenantId'] = options[:tenant]
+      end
+    end
+
     @instances_interface.setopts(options)
     if options[:dry_run]
       print_dry_run @instances_interface.dry.list(params)
@@ -241,6 +261,7 @@ class Morpheus::Cli::Instances
       if options[:owner]
         subtitles << "Created By: #{options[:owner]}"
       end
+
       subtitles += parse_list_subtitles(options)
       print_h1 title, subtitles, options
       if instances.empty?
@@ -279,7 +300,7 @@ class Morpheus::Cli::Instances
             connection: format_instance_connection_string(instance),
             environment: instance['instanceContext'],
             user: (instance['owner'] ? (instance['owner']['username'] || instance['owner']['id']) : (instance['createdBy'].is_a?(Hash) ? instance['createdBy']['username'] : instance['createdBy'])),
-            tenant: (instance['owner'] ? (instance['owner']['username'] || instance['owner']['id']) : (instance['createdBy'].is_a?(Hash) ? instance['createdBy']['username'] : instance['createdBy'])),
+            tenant: (instance['tenant'] ? instance['tenant']['name'] : ''),
             nodes: instance['containers'].count,
             status: format_instance_status(instance, cyan),
             type: instance['instanceType']['name'],
@@ -294,17 +315,19 @@ class Morpheus::Cli::Instances
           }
           row
         }
-        columns = [:id, {:name => {:max_width => 50}}, :labels, :group, :cloud, 
+        columns = [:id, {:name => {:max_width => 50}}, :tenant, :group, :cloud, 
             :type, :version, :environment, :plan,
             {:created => {:display_name => "CREATED"}}, 
-            # {:tenant => {:display_name => "TENANT"}}, 
             {:user => {:display_name => "OWNER", :max_width => 20}}, 
-            :nodes, {:connection => {:max_width => 30}}, :status, :cpu, :memory, :storage]
+            :nodes, {:connection => {:max_width => 30}}, :status, :cpu, :memory, :storage].compact
         # custom pretty table columns ... this is handled in as_pretty_table now(), 
         # todo: remove all these.. and try to always pass rows as the json data itself..
         if options[:details] != true
           columns.delete(:labels)
           columns.delete(:plan)
+        end
+        if !options[:include_tenants] && !options[:tenant]
+          columns.delete(:tenant)
         end
         print cyan
         print as_pretty_table(rows, columns, options)
@@ -1337,6 +1360,9 @@ class Morpheus::Cli::Instances
       opts.on('--refresh-until STATUS', String, "Refresh until a specified status is reached.") do |val|
         options[:refresh_until_status] = val.to_s.downcase
       end
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant instances when finding instance by name") do
+        options[:include_tenants] = true
+      end
       # opts.on( nil, '--threshold', "Alias for --scaling" ) do
       #   options[:include_scaling] = true
       # end
@@ -1369,7 +1395,7 @@ class Morpheus::Cli::Instances
     end
     instance = nil
     if id.to_s !~ /\A\d{1,}\Z/
-      instance = find_instance_by_name_or_id(id)
+      instance = find_instance_by_name_or_id(id, options[:include_tenants])
       return 1, "Instance not found by name #{id}" if instance.nil?
       id = instance['id']
     end
@@ -1463,7 +1489,7 @@ class Morpheus::Cli::Instances
             it['createdBy'] ? (it['createdBy']['username'] || it['createdBy']['id']) : '' 
           end
         },
-        #"Tenant" => lambda {|it| it['tenant'] ? it['tenant']['name'] : '' },
+        "Tenant" => lambda {|it| it['tenant'] ? it['tenant']['name'] : '' },
         "Apps" => lambda {|it| anded_list(it['apps'] ? it['apps'].collect {|app| app['name'] } : [])},
         "Date Created" => lambda {|it| format_local_dt(it['dateCreated']) },
         # "Last Updated" => lambda {|it| format_local_dt(it['lastUpdated']) },

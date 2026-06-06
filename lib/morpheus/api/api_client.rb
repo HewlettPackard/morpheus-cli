@@ -1034,6 +1034,10 @@ class Morpheus::APIClient
     Morpheus::MigrationsInterface.new(common_interface_options).setopts(@options)
   end
 
+  def tokens
+    Morpheus::TokensInterface.new(common_interface_options).setopts(@options)
+  end
+
   def rest(endpoint)
     Morpheus::RestInterface.new(common_interface_options).setopts(@options.merge({base_path: "#{@base_url}/api/#{endpoint}"}))
   end
@@ -1047,6 +1051,10 @@ class Morpheus::APIClient
     return send(interface_name)
   end
   alias :get_interface :interface
+
+  def support_bundles
+    Morpheus::SupportBundlesInterface.new(common_interface_options).setopts(@options)
+  end
 
   # add new interfaces here
 

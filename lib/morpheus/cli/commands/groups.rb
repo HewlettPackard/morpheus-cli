@@ -2,6 +2,7 @@ require 'morpheus/cli/cli_command'
 
 class Morpheus::Cli::Groups
   include Morpheus::Cli::CliCommand
+  include Morpheus::Cli::AccountsHelper
   include Morpheus::Cli::InfrastructureHelper
   include Morpheus::Cli::OptionSourceHelper
 
@@ -19,6 +20,8 @@ class Morpheus::Cli::Groups
     @groups_interface = @api_client.groups
     @clouds_interface = @api_client.clouds
     @options_interface = @api_client.options
+    @accounts_interface = @api_client.accounts
+    @account_users_interface = @api_client.account_users
     @active_group_id = Morpheus::Cli::Groups.active_groups[@appliance_name]
   end
 
@@ -37,12 +40,31 @@ class Morpheus::Cli::Groups
       opts.on('--all-labels LABEL', String, "Filter by labels, must match all of the values") do |val|
         add_query_parameter(params, 'allLabels', parse_labels(val))
       end
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant groups") do
+        options[:include_tenants] = true
+        params['includeTenants'] = true
+      end
+      opts.on('--tenant TENANT', String, "Tenant Name or ID" ) do |val|
+        options[:tenant] = val
+      end
       build_standard_list_options(opts, options)
       opts.footer = "List groups."
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:0)
     connect(options)
+    if options[:tenant]
+      if options[:tenant].to_s !~ /\A\d{1,}\Z/
+        account = find_account_by_name_or_id(options[:tenant])
+        if account.nil?
+          return 1, "Tenant not found by name: #{options[:tenant]}"
+        else
+          params['tenantId'] = account['id']
+        end
+      else
+        params['tenantId'] = options[:tenant]
+      end
+    end
     params.merge!(parse_list_options(options))
     @groups_interface.setopts(options)
     if options[:dry_run]
@@ -71,6 +93,9 @@ class Morpheus::Cli::Groups
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do|opts|
       opts.banner = subcommand_usage("[name]")
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant groups when finding group by name") do
+        options[:include_tenants] = true
+      end
       build_standard_get_options(opts, options)
       opts.footer = <<-EOT
 Get details about a group.
@@ -86,25 +111,20 @@ EOT
     end
   end
 
-  def _get(arg, options={})
-    begin
-      if options[:dry_run]
-        @groups_interface.setopts(options)
-        if arg.to_s =~ /\A\d{1,}\Z/
-          print_dry_run @groups_interface.dry.get(arg.to_i)
-        else
-          print_dry_run @groups_interface.dry.list({name:arg})
-        end
-        return 0
-      end
-      group = find_group_by_name_or_id(arg)
-      @groups_interface.setopts(options)
-      #json_response = @groups_interface.get(group['id'])
-      json_response = {'group' => group}
-      
-      render_result = render_with_format(json_response, options)
-      return 0 if render_result
-
+  def _get(id, options={})
+    params = {}
+    group = nil
+    if id.to_s !~ /\A\d{1,}\Z/
+      group = find_group_by_name_or_id(id, options[:include_tenants])
+      id = group['id']
+    end
+    @groups_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @groups_interface.dry.get(id.to_i, params)
+      return
+    end
+    json_response = @groups_interface.get(id.to_i, params)
+    render_response(json_response, options, 'group') do
       group = json_response['group']
       group_stats = group['stats']
       # serverCounts moved to zone.stats.serverCounts
@@ -124,6 +144,7 @@ EOT
         "Location" => 'location',
         "Labels" => lambda {|it| format_list(it['labels'], '') rescue '' },
         "Clouds" => lambda {|it| it['zones'].collect {|z| z['name'] }.join(', ') },
+        "Tenant" => lambda {|it| it['account'] ? it['account']['name'] : '' },
         #"Instances" => lambda {|it| it['stats']['instanceCounts']['all'] rescue '' },
         # "Hosts" => lambda {|it| it['stats']['serverCounts']['host'] rescue it['serverCount'] },
         # "VMs" => lambda {|it| it['stats']['serverCounts']['vm'] rescue '' },
@@ -665,13 +686,14 @@ EOT
 
   protected
 
-  def print_groups_table(groups, opts={})
-    table_color = opts[:color] || cyan
+  def print_groups_table(groups, options={})
+    table_color = options[:color] || cyan
     active_group = @active_group_id ? groups.find {|group| group['id'] == @active_group_id } : nil
     rows = groups.collect do |group|
       {
         id: active_group ? (((@active_group_id && (@active_group_id == group['id'])) ? "=> " : "   ") + group['id'].to_s) : group['id'],
         name: group['name'],
+        tenant: group['account'] ? group['account']['name'] : '',
         labels: group['labels'],
         location: group['location'],
         cloud_count: group['zones'] ? group['zones'].size : 0,
@@ -685,6 +707,7 @@ EOT
       #{:active => {:display_name => ""}},
       {:id => {:display_name => (active_group ? "   ID" : "ID")}},
       {:name => {:width => 64}},
+      options[:include_tenants] || options[:tenant] ? {:tenant => {:width => 32}} : nil,
       {:location => {:width => 32}},
       {:labels => {:display_method => lambda {|it| format_list(it[:labels], '', 3) rescue '' }}},
       {:cloud_count => {:display_name => "CLOUDS"}},
@@ -692,8 +715,8 @@ EOT
       {:host_count => {:display_name => "HOSTS"}},
       {:vm_count => {:display_name => "VMS"}},
       {:baremetal_count => {:display_name => "BARE METAL"}},
-    ]
-    print as_pretty_table(rows, columns, opts)
+  ].compact
+    print as_pretty_table(rows, columns, options)
   end
 
   def add_group_option_types()

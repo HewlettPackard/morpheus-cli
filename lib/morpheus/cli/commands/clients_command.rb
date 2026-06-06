@@ -30,41 +30,29 @@ class Morpheus::Cli::ClientsCommand
     end
     optparse.parse!(args)
     connect(options)
-
+    # verify_args!(args:args, optparse:optparse, count:0)
+    if args.count > 0
+      options[:phrase] = args.join(" ")
+    end
     params.merge!(parse_list_options(options))
     @clients_interface.setopts(options)
     if options[:dry_run]
       print_dry_run @clients_interface.dry.list(params)
       return 0
     end
-
     json_response = @clients_interface.list(params)
     render_response(json_response, options, "clients") do 
-      clients = json_response["clients"]
-      if clients.empty?
-        print cyan,"No clients found",reset,"\n"
-      else
-        rows = clients.collect {|client|
-          row = {
-            id: client['id'],
-            client_id: client['clientId'],
-            access_token_seconds: client['accessTokenValiditySeconds'],
-            refresh_token_seconds: client['refreshTokenValiditySeconds']
-          }
-          row
-        }
-        columns = [:id, {:client_id => {:max_width => 50}}, :access_token_seconds, :refresh_token_seconds]
-        print_h1 "Morpheus Clients", [], options
-        print as_pretty_table(rows, columns, options)
-        print reset
-        print_results_pagination(json_response)
-      end
+      clients = json_response['clients']
+      print_h1 "Morpheus Clients", [], options
+      print as_pretty_table(clients, client_columns.upcase_keys!, options)
+      print reset
+      print_results_pagination(json_response)
       print reset,"\n"
     end
-    return 0, nil
   end
 
   def get(args)
+    params = {}
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[client]")
@@ -74,47 +62,28 @@ class Morpheus::Cli::ClientsCommand
 
     end
     optparse.parse!(args)
-    if args.count < 1
-      puts optparse
-      exit 1
-    end
+    verify_args!(args:args, optparse:optparse, count:1)
     connect(options)
-    begin
-      @clients_interface.setopts(options)
-      if options[:dry_run]
-        if args[0].to_s =~ /\A\d{1,}\Z/
-          print_dry_run @clients_interface.dry.get(args[0])
-        else
-          print_dry_run @clients_interface.dry.list({name: args[0].to_s})
-        end
-        return 0
-      end
-      client = find_client_by_name_or_id(args[0])
+    id = args[0]
+    if id.to_s !~ /\A\d{1,}\Z/
+      client = find_client_by_client_id(id)
       return 1 if client.nil?
-      json_response = {'client' => client}
-      render_result = render_with_format(json_response, options, 'client')
-      return 0 if render_result
-
-      unless options[:quiet]
-        print_h1 "Client Details"
-        print cyan
-        client_columns = {
-          "ID" => 'id',
-          "Client ID" => 'clientId',
-          "Access Token Validity Seconds" => 'accessTokenValiditySeconds',
-          "Refresh Token Validity Seconds" => 'refreshTokenValiditySeconds',
-          # "Scopes" => lambda {|client| client['scopes'].join(", ")},
-          "Redirect URI" => lambda {|client| client['redirectUris'].join(", ")}
-        }
-        print_description_list(client_columns, client)
-        print reset,"\n"
-
-      end
+      id = client['id']
+    else
+      id = id.to_i
+    end
+    @clients_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @clients_interface.dry.get(id, params)
+      return
+    end
+    json_response = @clients_interface.get(id, params)
+    render_response(json_response, options, 'client') do
+      client = json_response['client']
+      print_h1 "Client Details", [], options
+      print cyan
+      print_description_list(client_columns, client)
       print reset,"\n"
-      return 0
-    rescue RestClient::Exception => e
-      print_rest_exception(e, options)
-      exit 1
     end
   end
 
@@ -151,6 +120,7 @@ class Morpheus::Cli::ClientsCommand
         payload.deep_merge!({'client' => passed_options}) unless passed_options.empty?
         # prompt for options
         params = Morpheus::Cli::OptionTypes.prompt(add_client_option_types, options[:options], @api_client, options[:params])
+        params.booleanize!
         if params['redirectUris'] && params['redirectUris'].is_a?(String)
           params['redirectUris'] = params['redirectUris'].split(',').collect {|it| it.strip}.reject {|it| it.empty?}
         end
@@ -182,7 +152,7 @@ class Morpheus::Cli::ClientsCommand
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[clientId] [options]")
-      build_option_type_options(opts, options, client_option_types)
+      build_option_type_options(opts, options, update_client_option_types)
       build_standard_update_options(opts, options)
       opts.footer = "Update Oauth Client Record."
     end
@@ -212,8 +182,9 @@ class Morpheus::Cli::ClientsCommand
         # allow arbitrary -O options
         payload.deep_merge!({'client' => passed_options}) unless passed_options.empty?
         # prompt for options
-        #params = Morpheus::Cli::OptionTypes.prompt(update_wiki_page_option_types, options[:options], @api_client, options[:params])
+        #params = Morpheus::Cli::OptionTypes.no_prompt(update_client_option_types, options[:options], @api_client, options[:params])
         params = passed_options
+        params.booleanize!
         if params['redirectUris'] && params['redirectUris'].is_a?(String)
           params['redirectUris'] = params['redirectUris'].split(',').collect {|it| it.strip}.reject {|it| it.empty?}
         end
@@ -325,21 +296,36 @@ class Morpheus::Cli::ClientsCommand
     end
   end
 
-  def client_option_types
+  def client_columns
+    {
+      "ID" => lambda {|it| it['id'] },
+      "Client ID" => lambda {|it| it['clientId'] },
+      "TTL" => lambda {|it| it['accessTokenValiditySeconds'] },
+      "Refresh TTL" => lambda {|it| it['refreshTokenValiditySeconds'] },
+      "Redirect URI" => lambda {|client| client['redirectUris'].join(", ")},
+      "Requires Consent" => lambda {|it| format_boolean it['requireConsent']}
+    }
+  end
+
+
+  def add_client_option_types
     [
-      {'fieldName' => 'clientId', 'fieldLabel' => 'Client Id', 'type' => 'text', 'required' => true, 'displayOrder' => 1},
-      {'fieldName' => 'accessTokenValiditySeconds', 'fieldLabel' => 'Access Token Validity Length (Seconds)', 'type' => 'number', 'required' => true, 'defaultValue' => 43200,'displayOrder' => 2},
-      {'fieldName' => 'refreshTokenValiditySeconds', 'fieldLabel' => 'Refresh Token Validity Length (Seconds)', 'type' => 'number', 'required' => true, 'defaultValue' => 43200,'displayOrder' => 3}
+      {'fieldName' => 'clientId', 'fieldLabel' => 'Client Id', 'type' => 'text', 'required' => true},
+      {'fieldName' => 'clientSecret', 'fieldLabel' => 'Client Secret', 'type' => 'text'},
+      {'switch' => 'ttl', 'fieldName' => 'accessTokenValiditySeconds', 'fieldLabel' => 'TTL (Seconds)', 'type' => 'number', 'required' => true,'defaultValue' => 43200, 'description' => 'Access Token Validity Seconds'},
+      {'switch' => 'refresh-ttl', 'fieldName' => 'refreshTokenValiditySeconds', 'fieldLabel' => 'Refresh TTL (Seconds)', 'type' => 'number', 'required' => true,'defaultValue' => 43200, 'description' => 'Refresh Token Validity Seconds'},
+      {'fieldName' => 'redirectUris', 'fieldLabel' => 'Redirect URI', 'type' => 'text', 'description' => 'Redirect URI(s), use commas to delimit values.'},
+      {'fieldName' => 'requireConsent', 'fieldLabel' => 'Requires Consent', 'type' => 'checkbox', 'defaultValue' => false}
     ]
   end
 
-   def add_client_option_types
-    [
-      {'fieldName' => 'clientId', 'fieldLabel' => 'Client Id', 'type' => 'text', 'required' => true, 'displayOrder' => 1},
-      {'fieldName' => 'clientSecret', 'fieldLabel' => 'Client Secret', 'type' => 'text', 'displayOrder' => 2},
-      {'fieldName' => 'accessTokenValiditySeconds', 'fieldLabel' => 'Access Token Validity Length (Seconds)', 'type' => 'number', 'required' => true,'defaultValue' => 43200, 'displayOrder' => 3},
-      {'fieldName' => 'refreshTokenValiditySeconds', 'fieldLabel' => 'Refresh Token Validity Length (Seconds)', 'type' => 'number', 'required' => true,'defaultValue' => 43200, 'displayOrder' => 4},
-      {'fieldName' => 'redirectUris', 'fieldLabel' => 'Redirect URI', 'type' => 'text', 'displayOrder' => 5}
-    ]
+  def update_client_option_types
+    option_types = add_client_option_types #.select {|it| ['clientId', 'clientSecret', 'accessTokenValiditySeconds'].include?(it['fieldName']) }
+    option_types.each {|it| 
+      it.delete('required')
+      it.delete('defaultValue')
+      it.delete('skipSingleOption')
+    }
+    option_types
   end
 end

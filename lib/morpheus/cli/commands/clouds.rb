@@ -2,6 +2,7 @@ require 'morpheus/cli/cli_command'
 
 class Morpheus::Cli::Clouds
   include Morpheus::Cli::CliCommand
+  include Morpheus::Cli::AccountsHelper
   include Morpheus::Cli::InfrastructureHelper
   include Morpheus::Cli::ProvisioningHelper
   include Morpheus::Cli::WhoamiHelper
@@ -25,6 +26,8 @@ class Morpheus::Cli::Clouds
     @api_client = establish_remote_appliance_connection(opts)
     @clouds_interface = @api_client.clouds
     @groups_interface = @api_client.groups
+    @accounts_interface = @api_client.accounts
+    @account_users_interface = @api_client.account_users
     @active_group_id = Morpheus::Cli::Groups.active_groups[@appliance_name]
   end
 
@@ -49,6 +52,13 @@ class Morpheus::Cli::Clouds
       opts.on('--all-labels LABEL', String, "Filter by labels, must match all of the values") do |val|
         add_query_parameter(params, 'allLabels', parse_labels(val))
       end
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant clouds") do
+        options[:include_tenants] = true
+        params['includeTenants'] = true
+      end
+      opts.on('--tenant TENANT', String, "Tenant Name or ID" ) do |val|
+        options[:tenant] = val
+      end
       build_standard_list_options(opts, options)
       opts.footer = "List clouds."
     end
@@ -69,7 +79,18 @@ class Morpheus::Cli::Clouds
           params['groupId'] = group['id']
         end
       end
-
+      if options[:tenant]
+        if options[:tenant].to_s !~ /\A\d{1,}\Z/
+          account = find_account_by_name_or_id(options[:tenant])
+          if account.nil?
+            return 1, "Tenant not found by name: #{options[:tenant]}"
+          else
+            params['tenantId'] = account['id']
+          end
+        else
+          params['tenantId'] = options[:tenant]
+        end
+      end
       params.merge!(parse_list_options(options))
       @clouds_interface.setopts(options)
       if options[:dry_run]
@@ -94,6 +115,9 @@ class Morpheus::Cli::Clouds
           print cyan,"No clouds found.",reset,"\n"
         else          
           columns = cloud_list_column_definitions(options).upcase_keys!
+          if !options[:include_tenants] && !options[:tenant]
+            columns.delete("Tenant")
+          end
           print as_pretty_table(clouds, columns, options)
           print_results_pagination(json_response)
         end
@@ -141,6 +165,9 @@ class Morpheus::Cli::Clouds
     params = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[name]")
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant clouds when finding cloud by name") do
+        options[:include_tenants] = true
+      end
       build_standard_list_options(opts, options)
       opts.footer = "Get details about a cloud.\n" +
                     "[name] is required. This is the name or id of a cloud."
@@ -158,7 +185,7 @@ class Morpheus::Cli::Clouds
   def _get(id, params, options={})
     cloud = nil
     if id.to_s !~ /\A\d{1,}\Z/
-      cloud = find_cloud_by_name_or_id(id)
+      cloud = find_cloud_by_name_or_id(id, options[:include_tenants])
       id = cloud['id']
     end
     @clouds_interface.setopts(options)
@@ -1481,6 +1508,7 @@ EOT
     {
       "ID" => 'id',
       "Name" => 'name',
+      "Tenant" => lambda {|it| it['owner'] ? it['owner']['name'] : '' },
       "Type" => lambda {|it| it['zoneType'] ? it['zoneType']['name'] : '' },
       "Labels" => lambda {|it| format_list(it['labels'], '', 3) rescue '' },
       "Location" => 'location',
