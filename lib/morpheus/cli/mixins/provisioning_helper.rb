@@ -1063,6 +1063,13 @@ module Morpheus::Cli::ProvisioningHelper
       end
     end
 
+    # Fix any hugepages option type is using on/off which
+    if payload['config']
+      if payload['config']['hugepages'] == "off"
+        payload['config'].delete('hugepages')
+      end
+    end
+
     return payload
   end
 
