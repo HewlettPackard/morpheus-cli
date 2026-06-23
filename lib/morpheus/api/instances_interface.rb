@@ -296,7 +296,7 @@ class Morpheus::InstancesInterface < Morpheus::APIClient
   def service_plans(params={})
     url = "#{@base_url}/api/instances/service-plans"
     headers = { params: params, authorization: "Bearer #{@access_token}" }
-    opts = {method: :get, url: url, headers: headers}
+    opts = {method: :get, url: url, headers: headers, timeout: 180}
     execute(opts)
   end
 
