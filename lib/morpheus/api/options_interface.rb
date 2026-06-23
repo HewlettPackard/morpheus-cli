@@ -12,6 +12,6 @@ class Morpheus::OptionsInterface < Morpheus::APIClient
       url = "#{@base_url}/api/options/#{option_source_type}/#{source}"
     end
     headers = { params: params, authorization: "Bearer #{@access_token}" }
-    execute(method: :get, url: url, headers: headers)
+    execute(method: :get, url: url, headers: headers, timeout: 180)
   end
 end
