@@ -698,6 +698,13 @@ class Morpheus::Cli::Clusters
         ssh_host_option = option_type_list.select{|it| it['fieldName'] == 'sshHosts'}.first
         ssh_host_option['minCount'] = server_count unless ssh_host_option.nil?
 
+        # Fix for bug in 9.0.0 - 9.0.2 with optionType data where defaultValue is set to "unmanaged" for witness.id, which is not a valid value. Remove it so the user can select a valid value.
+        option_type_list.each do |option_type|
+          if option_type['fieldName'] == 'witness.id' && option_type['defaultValue'] == 'unmanaged'
+            option_type.delete('defaultValue')
+          end
+        end
+
         # Server options
         server_payload.deep_merge!(Morpheus::Cli::OptionTypes.prompt(option_type_list, options[:options].deep_merge({:context_map => {'domain' => ''}}), @api_client, api_params, options[:no_prompt], true))
 
