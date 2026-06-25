@@ -29,12 +29,28 @@ class Morpheus::Cli::StorageVolumes
     opts.on('--category VALUE', String, "Filter by category") do |val|
       params['category'] = val
     end
+    opts.on('--include-tenants', '--include-tenants', "Include sub-tenant storage volumes (master tenant only)") do
+      options[:include_tenants] = true
+      params['includeTenants'] = true
+    end
+    opts.on('--tenant TENANT', String, "Filter by Tenant Name or ID (master tenant only)") do |val|
+      options[:tenant] = val
+    end
     # build_standard_list_options(opts, options)
     super
   end
 
   def parse_list_options!(args, options, params)
     parse_parameter_as_resource_id!(:storage_server, options, params)
+    if options[:tenant]
+      if options[:tenant].to_s =~ /\A\d+\Z/
+        params['tenantId'] = options[:tenant]
+      else
+        account = find_account_by_name_or_id(options[:tenant])
+        return 1 if account.nil?
+        params['tenantId'] = account['id']
+      end
+    end
     super
   end
 
