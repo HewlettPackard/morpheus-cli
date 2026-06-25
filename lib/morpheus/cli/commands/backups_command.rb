@@ -96,6 +96,8 @@ EOT
       print_h1 "Backup Details", [], options
       print cyan
       columns = backup_column_definitions
+      columns.delete("Backup Provider") if backup['backupProvider'].nil?
+      columns.delete("Storage Provider") if backup['storageProvider'].nil?
       columns.delete("Instance") if backup['instance'].nil?
       columns.delete("Container ID") if backup['containerId'].nil?
       columns.delete("Host") if backup['server'].nil?
@@ -541,8 +543,9 @@ EOT
     {
       "ID" => 'id',
       "Name" => 'name',
-      "Backup Type" => lambda {|it| format_backup_type_tag(it) },
-      "Backup Location" => lambda {|it| format_backup_location_tag(it) },
+      "Backup Type" => lambda {|it| (it['backupType'] && it['backupType']['name']) ? it['backupType']['name'] : format_backup_type_tag(it) },
+      "Backup Provider" => lambda {|it| it['backupProvider']['name'] rescue '' },
+      "Storage Provider" => lambda {|it| it['storageProvider']['name'] rescue '' },
       "Location Type" => lambda {|it| 
         if it['locationType'] == "instance"
           "Instance"
@@ -610,11 +613,11 @@ EOT
   def format_backup_location_tag(backup)
     # check storage provider or backup provider indicating remote storage
     if backup['storageProvider'] && backup['storageProvider']['id']
-      provider_type = backup['storageProvider']['type'] || backup['storageProvider']['providerType'] || ''
-      "#{green}REMOTE#{reset} (#{provider_type})"
+      provider_label = backup['storageProvider']['type'] || backup['storageProvider']['providerType'] || backup['storageProvider']['name'] || ''
+      "#{green}REMOTE#{reset} (#{provider_label})"
     elsif backup['backupProvider'] && backup['backupProvider']['id']
-      provider_type = backup['backupProvider']['type'] || backup['backupProvider']['providerType'] || ''
-      "#{green}REMOTE#{reset} (#{provider_type})"
+      provider_label = backup['backupProvider']['type'] || backup['backupProvider']['providerType'] || backup['backupProvider']['name'] || ''
+      "#{green}REMOTE#{reset} (#{provider_label})"
     else
       "#{blue}LOCAL#{reset}"
     end
