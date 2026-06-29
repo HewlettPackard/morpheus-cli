@@ -117,7 +117,11 @@ class Morpheus::VirtualImagesInterface < Morpheus::APIClient
          gz.close
       }
       http_opts[:body] = Morpheus::BodyIO.new(rd)
-      response = http.post(url, http_opts)
+      if Gem::Version.new(HTTP::VERSION) >= Gem::Version.new("6.0.0")
+        response = http.post(url, **http_opts)
+      else
+        response = http.post(url, http_opts)
+      end
     else
       if @dry_run
         return {method: :post, url: url, headers: headers, params: query_params, payload: payload}
@@ -126,7 +130,11 @@ class Morpheus::VirtualImagesInterface < Morpheus::APIClient
       http = HTTP.headers(headers)
       http_opts[:params] = query_params
       http_opts[:body] = payload
-      response = http.post(url, http_opts)
+      if Gem::Version.new(HTTP::VERSION) >= Gem::Version.new("6.0.0")
+        response = http.post(url, **http_opts)
+      else
+        response = http.post(url, http_opts)
+      end
     end
     # puts "Took #{Time.now.to_i - start_time.to_i}"
     # return response
