@@ -3245,6 +3245,9 @@ class Morpheus::Cli::Clusters
       opts.on('--supports-vm-secure-metadata [on|off]', String, "Enable VM Secure Metadata support") do |val|
         options[:supportsVmSecureMetadata] = val.to_s == 'on' || val.to_s == 'true' || val.to_s == ''
       end
+      opts.on('--heartbeat-target [on|off]', String, "Set as the heartbeat target. Default is on") do |val|
+        options[:heartbeatTarget] = val.to_s == 'on' || val.to_s == 'true' || val.to_s == '1' || val.to_s == ''
+      end
       add_perms_options(opts, options, ['plans', 'groupDefaults'])
       build_common_options(opts, options, [:options, :payload, :json, :dry_run, :remote])
       opts.footer = "Update a cluster datastore.\n" +
@@ -3262,6 +3265,7 @@ class Morpheus::Cli::Clusters
       cluster = find_cluster_by_name_or_id(args[0])
       return 1 if cluster.nil?
       datastore = find_datastore_by_name_or_id(cluster['id'], args[1])
+      datastore_type = find_datastore_type_by_code(datastore['datastoreType']['code']) rescue nil
       if datastore.nil?
         print_red_alert "Datastore not found by '#{args[1]}'"
         exit 1
@@ -3277,6 +3281,14 @@ class Morpheus::Cli::Clusters
         payload = {'datastore' => {}}
         payload['datastore']['active'] = options[:active].nil? ? (Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox', 'description' => 'Datastore Active', 'defaultValue' => true}], options[:options], @api_client))['active'] == 'on' : options[:active]
         payload['datastore']['supportsVmSecureMetadata'] = options[:supportsVmSecureMetadata] unless options[:supportsVmSecureMetadata].nil?
+        
+        if !options[:heartbeatTarget].nil?
+          payload['datastore']['heartbeatTarget'] = options[:heartbeatTarget]
+        elsif datastore_type && datastore_type['heartbeatTargetCapable'] == true
+          val = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'heartbeatTarget', 'fieldLabel' => 'Heartbeat Target', 'type' => 'checkbox', 'description' => 'Heartbeat Target', 'defaultValue' => datastore['heartbeatTarget']}], options[:options], @api_client)['heartbeatTarget']
+          payload['datastore']['heartbeatTarget'] = val == 'on' || val == true unless val.nil? || val == ''
+        end
+        
 
         perms = prompt_permissions(options.merge({:available_plans => namespace_service_plans}), datastore['owner']['id'] == current_user['accountId'] ? ['plans', 'groupDefaults'] : ['plans', 'groupDefaults', 'visibility', 'tenants'])
         perms_payload = {}
