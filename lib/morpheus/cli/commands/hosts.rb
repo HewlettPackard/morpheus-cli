@@ -796,6 +796,10 @@ class Morpheus::Cli::Hosts
       opts.on("--security-groups LIST", Integer, "Security Groups, comma separated list of security group IDs") do |val|
         options[:security_groups] = val.split(",").collect {|s| s.strip }.select {|s| !s.to_s.empty? }
       end
+      opts.on("--storage-controller ARRAY", String, "Storage Controllers, JSON array of controller configs. Each entry accepts id, busNumber, typeId, typeName, removable, editable.") do |val|
+        options[:options] ||= {}
+        options[:options]['storageController'] = JSON.parse(val)
+      end
       opts.on('--tags LIST', String, "Metadata tags in the format 'ping=pong,flash=bang'") do |val|
         options[:metadata] = val
       end
@@ -954,6 +958,10 @@ class Morpheus::Cli::Hosts
           volumes = prompt_volumes(service_plan, provision_type, options, @api_client, {zoneId: cloud_id, serverTypeId: server_type['id'], siteId: group_id})
           if !volumes.empty?
             payload['volumes'] = volumes
+          end
+
+          if options[:options] && options[:options]['storageController']
+            payload['storageController'] = options[:options]['storageController']
           end
 
           # plan customizations
@@ -1347,6 +1355,10 @@ class Morpheus::Cli::Hosts
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[name]")
+      opts.on("--storage-controller ARRAY", String, "Storage Controllers, JSON array of controller configs. Each entry accepts id, busNumber, typeId, typeName, removable, editable.") do |val|
+        options[:options] ||= {}
+        options[:options]['storageController'] = JSON.parse(val)
+      end
       build_common_options(opts, options, [:options, :json, :dry_run, :quiet, :remote])
     end
     optparse.parse!(args)
@@ -1435,6 +1447,9 @@ class Morpheus::Cli::Hosts
       # only amazon supports this option
       # for now, always do this
       payload[:deleteOriginalVolumes] = true
+      if options[:options] && options[:options]['storageController']
+        payload[:storageController] = options[:options]['storageController']
+      end
       @servers_interface.setopts(options)
       if options[:dry_run]
         print_dry_run @servers_interface.dry.resize(server['id'], payload)
