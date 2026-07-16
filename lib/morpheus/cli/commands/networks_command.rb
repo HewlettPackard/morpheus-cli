@@ -5,6 +5,7 @@ class Morpheus::Cli::NetworksCommand
   include Morpheus::Cli::WhoamiHelper
   include Morpheus::Cli::InfrastructureHelper
   include Morpheus::Cli::ProvisioningHelper
+  include Morpheus::Cli::AccountsHelper
 
   set_command_name :networks
 
@@ -28,6 +29,8 @@ class Morpheus::Cli::NetworksCommand
     @groups_interface = @api_client.groups
     @clouds_interface = @api_client.clouds
     @options_interface = @api_client.options
+    @accounts_interface = @api_client.accounts
+    @account_users_interface = @api_client.account_users
   end
 
   def handle(args)
@@ -57,6 +60,13 @@ class Morpheus::Cli::NetworksCommand
       opts.on('--all-labels LABEL', String, "Filter by labels, must match all of the values") do |val|
         add_query_parameter(params, 'allLabels', parse_labels(val))
       end
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant networks") do
+        options[:include_tenants] = true
+        params['includeTenants'] = true
+      end
+      opts.on('--tenant TENANT', String, "Tenant Name or ID" ) do |val|
+        options[:tenant] = val
+      end
       build_common_options(opts, options, [:list, :json, :yaml, :csv, :fields, :json, :dry_run, :remote])
       opts.footer = "List networks."
     end
@@ -72,6 +82,18 @@ class Morpheus::Cli::NetworksCommand
         cloud = find_cloud_by_name_or_id(options[:cloud])
         return 1 if cloud.nil?
         params['zoneId'] = cloud['id']
+      end
+      if options[:tenant]
+        if options[:tenant].to_s !~ /\A\d{1,}\Z/
+          account = find_account_by_name_or_id(options[:tenant])
+          if account.nil?
+            return 1, "Tenant not found by name: #{options[:tenant]}"
+          else
+            params['tenantId'] = account['id']
+          end
+        else
+          params['tenantId'] = options[:tenant]
+        end
       end
       @networks_interface.setopts(options)
       if options[:dry_run]
@@ -109,6 +131,7 @@ class Morpheus::Cli::NetworksCommand
             type: network['type'] ? network['type']['name'] : '',
             group: network['group'] ? network['group']['name'] : 'Shared',
             cloud: network['zone'] ? network['zone']['name'] : '',
+            tenant: network['owner'] ? network['owner']['name'] : '',
             cidr: network['cidr'],
             pool: network['pool'] ? network['pool']['name'] : '',
             dhcp: network['dhcpServer'] ? 'Yes' : 'No',
@@ -128,6 +151,7 @@ class Morpheus::Cli::NetworksCommand
                 type: "Subnet",
                 group: network['group'] ? network['group']['name'] : 'Shared',
                 cloud: network['zone'] ? network['zone']['name'] : '',
+                tenant: network['owner'] ? network['owner']['name'] : '',
                 cidr: subnet['cidr'],
                 pool: subnet['pool'] ? subnet['pool']['name'] : '',
                 dhcp: subnet['dhcpServer'] ? 'Yes' : 'No',
@@ -139,9 +163,13 @@ class Morpheus::Cli::NetworksCommand
             end
           end
         end
-        columns = [:id, :name, :labels, :type, :group, :cloud, :cidr, :pool, :dhcp, :subnets, :active, :visibility, :tenants]
+        columns = [:id, :name, :labels, :type, :group, :cloud, :tenant, :cidr, :pool, :dhcp, :subnets, :active, :visibility, :tenants]
         if options[:include_fields]
           columns = options[:include_fields]
+        else
+          if !options[:include_tenants] && !options[:tenant]
+            columns.delete(:tenant)
+          end
         end
         print cyan
         print as_pretty_table(rows, columns, options)
@@ -160,6 +188,9 @@ class Morpheus::Cli::NetworksCommand
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[network]")
+      opts.on('--include-tenants','--include-tenants', "Include sub tenant networks when finding network by name") do
+        options[:include_tenants] = true
+      end
       build_common_options(opts, options, [:json, :yaml, :csv, :fields, :dry_run, :remote])
       opts.footer = "Get details about a network." + "\n" +
                     "[network] is required. This is the name or id of a network."
@@ -177,11 +208,11 @@ class Morpheus::Cli::NetworksCommand
         if args[0].to_s =~ /\A\d{1,}\Z/
           print_dry_run @networks_interface.dry.get(args[0].to_i)
         else
-          print_dry_run @networks_interface.dry.list({name:args[0]})
+          print_dry_run @networks_interface.dry.list({name:args[0]}, options[:include_tenants])
         end
         return
       end
-      network = find_network_by_name_or_id(args[0])
+      network = find_network_by_name_or_id(args[0], options[:include_tenants])
       return 1 if network.nil?
       json_response = {'network' => network}  # skip redundant request
       # json_response = @networks_interface.get(network['id'])
@@ -206,6 +237,7 @@ class Morpheus::Cli::NetworksCommand
         "Type" => lambda {|it| it['type'] ? it['type']['name'] : '' },
         "Group" => lambda {|it| it['group'] ? it['group']['name'] : 'Shared' },
         "Cloud" => lambda {|it| it['zone'] ? it['zone']['name'] : '' },
+        "Tenant" => lambda {|it| it['owner'] ? it['owner']['name'] : '' },
         "IPv4 Enabled" => 'ipv4Enabled',
         "IPv6 Enabled" => 'ipv6Enabled',
         "CIDR" => 'cidr',
