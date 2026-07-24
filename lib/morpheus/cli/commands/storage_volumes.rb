@@ -4,13 +4,14 @@ class Morpheus::Cli::StorageVolumes
   include Morpheus::Cli::CliCommand
   include Morpheus::Cli::RestCommand
   include Morpheus::Cli::StorageVolumesHelper
+  include Morpheus::Cli::AccountsHelper
 
   set_command_name :'storage-volumes'
   set_command_description "View and manage storage volumes."
-  register_subcommands :list, :get, :add, :remove, :resize
+  register_subcommands :list, :get, :add, :remove, :resize, :update_tenant
 
   # RestCommand settings
-  register_interfaces :storage_volumes, :storage_volume_types
+  register_interfaces :storage_volumes, :storage_volume_types, :accounts
   set_rest_has_type true
 
   protected
@@ -28,12 +29,28 @@ class Morpheus::Cli::StorageVolumes
     opts.on('--category VALUE', String, "Filter by category") do |val|
       params['category'] = val
     end
+    opts.on('--include-tenants', '--include-tenants', "Include sub-tenant storage volumes (master tenant only)") do
+      options[:include_tenants] = true
+      params['includeTenants'] = true
+    end
+    opts.on('--tenant TENANT', String, "Filter by Tenant Name or ID (master tenant only)") do |val|
+      options[:tenant] = val
+    end
     # build_standard_list_options(opts, options)
     super
   end
 
   def parse_list_options!(args, options, params)
     parse_parameter_as_resource_id!(:storage_server, options, params)
+    if options[:tenant]
+      if options[:tenant].to_s =~ /\A\d+\Z/
+        params['tenantId'] = options[:tenant]
+      else
+        account = find_account_by_name_or_id(options[:tenant])
+        return 1 if account.nil?
+        params['tenantId'] = account['id']
+      end
+    end
     super
   end
 
@@ -120,6 +137,64 @@ class Morpheus::Cli::StorageVolumes
       payload['maxStorage'] = v_prompt['size'].to_i
       @storage_volumes_interface.resize(id, payload)
     end
+  end
+
+  def update_tenant(args)
+    options = {}
+    params = {}
+    tenant_id = nil
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[volume] --tenant TENANT")
+      opts.on('--tenant TENANT', String, "Target Tenant (Account) Name or ID to transfer ownership to.") do |val|
+        tenant_id = val
+      end
+      build_standard_update_options(opts, options)
+      opts.footer = <<-EOT
+Transfer ownership of a storage volume to another tenant.
+[volume] is required. This is the name or id of a storage volume.
+--tenant is required unless provided via --payload. This is the name or id of the target tenant.
+Only an unattached volume may be transferred. All authorization and business-rule
+validation is performed by the server; its message is shown verbatim on failure.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:1)
+    # CLI-side validation: require a target tenant unless a full payload is supplied.
+    # All other authorization and business rules are validated server-side.
+    if !options[:payload] && tenant_id.nil?
+      raise_command_error "--tenant is required to transfer ownership.\n#{optparse}"
+    end
+    connect(options)
+    volume = find_volume_by_name_or_id(args[0])
+    return 1 if volume.nil?
+    id = volume['id']
+    passed_options = parse_passed_options(options)
+    payload = {}
+    if options[:payload]
+      payload = options[:payload]
+      payload.deep_merge!({storage_volume_object_key => passed_options}) unless passed_options.empty?
+    else
+      account = find_account_by_name_or_id(tenant_id)
+      return 1 if account.nil?
+      payload[storage_volume_object_key] = {'tenant' => {'id' => account['id']}}
+      payload.deep_merge!({storage_volume_object_key => passed_options}) unless passed_options.empty?
+    end
+    @storage_volumes_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @storage_volumes_interface.dry.update_tenant(id, payload)
+      return 0, nil
+    end
+    json_response = @storage_volumes_interface.update_tenant(id, payload)
+    render_response(json_response, options, storage_volume_object_key) do
+      record = json_response[storage_volume_object_key]
+      owner_name = (record && record['owner'] ? record['owner']['name'] : (record && record['account'] ? record['account']['name'] : tenant_id))
+      print_green_success "Transferred storage volume #{record ? record['name'] : id} to tenant #{owner_name}"
+      print_h1 rest_label, [], options
+      print cyan
+      print_description_list(storage_volume_column_definitions(options), record, options)
+      print reset,"\n"
+    end
+    return 0, nil
   end
 
   def find_volume_by_id(id)

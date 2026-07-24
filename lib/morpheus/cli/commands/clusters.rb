@@ -13,6 +13,7 @@ class Morpheus::Cli::Clusters
   register_subcommands :list_workers, :add_worker, :remove_worker, :update_worker_count
   register_subcommands :list_masters
   register_subcommands :upgrade_cluster
+  register_subcommands :update_version
   register_subcommands :list_volumes, :remove_volume
   register_subcommands :list_namespaces, :get_namespace, :add_namespace, :update_namespace, :remove_namespace
   register_subcommands :list_containers, :remove_container, :restart_container, :get_container
@@ -696,6 +697,13 @@ class Morpheus::Cli::Clusters
         # Set node count for ssh hosts
         ssh_host_option = option_type_list.select{|it| it['fieldName'] == 'sshHosts'}.first
         ssh_host_option['minCount'] = server_count unless ssh_host_option.nil?
+
+        # Fix for bug in 9.0.0 - 9.0.2 with optionType data where defaultValue is set to "unmanaged" for witness.id, which is not a valid value. Remove it so the user can select a valid value.
+        option_type_list.each do |option_type|
+          if option_type['fieldName'] == 'witness.id' && option_type['defaultValue'] == 'unmanaged'
+            option_type.delete('defaultValue')
+          end
+        end
 
         # Server options
         server_payload.deep_merge!(Morpheus::Cli::OptionTypes.prompt(option_type_list, options[:options].deep_merge({:context_map => {'domain' => ''}}), @api_client, api_params, options[:no_prompt], true))
@@ -3237,6 +3245,9 @@ class Morpheus::Cli::Clusters
       opts.on('--supports-vm-secure-metadata [on|off]', String, "Enable VM Secure Metadata support") do |val|
         options[:supportsVmSecureMetadata] = val.to_s == 'on' || val.to_s == 'true' || val.to_s == ''
       end
+      opts.on('--heartbeat-target [on|off]', String, "Set as the heartbeat target. Default is on") do |val|
+        options[:heartbeatTarget] = val.to_s == 'on' || val.to_s == 'true' || val.to_s == '1' || val.to_s == ''
+      end
       add_perms_options(opts, options, ['plans', 'groupDefaults'])
       build_common_options(opts, options, [:options, :payload, :json, :dry_run, :remote])
       opts.footer = "Update a cluster datastore.\n" +
@@ -3254,6 +3265,7 @@ class Morpheus::Cli::Clusters
       cluster = find_cluster_by_name_or_id(args[0])
       return 1 if cluster.nil?
       datastore = find_datastore_by_name_or_id(cluster['id'], args[1])
+      datastore_type = find_datastore_type_by_code(datastore['datastoreType']['code']) rescue nil
       if datastore.nil?
         print_red_alert "Datastore not found by '#{args[1]}'"
         exit 1
@@ -3269,6 +3281,14 @@ class Morpheus::Cli::Clusters
         payload = {'datastore' => {}}
         payload['datastore']['active'] = options[:active].nil? ? (Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox', 'description' => 'Datastore Active', 'defaultValue' => true}], options[:options], @api_client))['active'] == 'on' : options[:active]
         payload['datastore']['supportsVmSecureMetadata'] = options[:supportsVmSecureMetadata] unless options[:supportsVmSecureMetadata].nil?
+        
+        if !options[:heartbeatTarget].nil?
+          payload['datastore']['heartbeatTarget'] = options[:heartbeatTarget]
+        elsif datastore_type && datastore_type['heartbeatTargetCapable'] == true
+          val = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'heartbeatTarget', 'fieldLabel' => 'Heartbeat Target', 'type' => 'checkbox', 'description' => 'Heartbeat Target', 'defaultValue' => datastore['heartbeatTarget']}], options[:options], @api_client)['heartbeatTarget']
+          payload['datastore']['heartbeatTarget'] = val == 'on' || val == true unless val.nil? || val == ''
+        end
+        
 
         perms = prompt_permissions(options.merge({:available_plans => namespace_service_plans}), datastore['owner']['id'] == current_user['accountId'] ? ['plans', 'groupDefaults'] : ['plans', 'groupDefaults', 'visibility', 'tenants'])
         perms_payload = {}
@@ -4424,6 +4444,58 @@ class Morpheus::Cli::Clusters
 
   def get_type(args)
     Morpheus::Cli::ClusterTypes.new.get(args)
+  end
+
+  def update_version(args)
+    params = {}
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[cluster]")
+      build_standard_update_options(opts, options, [:auto_confirm])
+      opts.footer = "Updates HVM cluster layout to a new version.\n" +
+                    "[cluster] is required. This is the name or id of an existing cluster.\n"
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:1)
+    connect(options)
+
+    cluster = find_cluster_by_name_or_id(args[0])
+    return 1 if cluster.nil?
+
+    payload = {}
+    if options[:payload]
+      payload = options[:payload]
+      payload.deep_merge!(parse_passed_options(options))
+    else
+      payload.deep_merge!(parse_passed_options(options))
+      
+      available_updates = @clusters_interface.available_updates(cluster['id'])['updateDefinitions']
+      if available_updates.empty?
+        print yellow,"No updates available for cluster #{cluster['name']}",reset,"\n"
+        return 1, "No updates available for cluster #{cluster['name']}"
+      end
+      version_options = available_updates.collect { |it| {'name' => it['name'], 'value' => it['id']} }
+      update_definition_id = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'updateDefinitionId', 'type' => 'select', 'fieldLabel' => 'Update', 'selectOptions' => version_options, 'required' => true, 'description' => 'Select version update to execute' }],options[:options],api_client,{})['updateDefinitionId']
+      payload.deep_merge!({'updateDefinitionId' => update_definition_id})
+    end
+    target_version = available_updates.find { |it| it['id'] == payload['updateDefinitionId'] }['updateVersion'] rescue nil
+    if target_version.nil?
+      print_red_alert "Unable to determine target version for update definition #{payload['updateDefinitionId']}"
+      return 1, "Unable to determine target version for update definition #{payload['updateDefinitionId']}"
+    end 
+    unless options[:yes] || Morpheus::Cli::OptionTypes.confirm("Are you sure you want to update cluster #{cluster['name']} to version #{target_version}?")
+      return 9, "aborted command"
+    end
+    @clusters_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @clusters_interface.dry.execute_update(cluster['id'], payload)
+      return
+    end
+    json_response = @clusters_interface.execute_update(cluster['id'], payload)
+    render_response(json_response, options) do
+      print_green_success "Cluster #{cluster['name']} is being updated to version #{target_version}..."
+    end
+    return 0, nil
   end
 
   private

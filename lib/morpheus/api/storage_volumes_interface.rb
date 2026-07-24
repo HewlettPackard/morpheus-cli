@@ -13,4 +13,12 @@ class Morpheus::StorageVolumesInterface < Morpheus::RestInterface
     execute(opts)
   end
 
+  # Transfer ownership of a storage volume to another tenant.
+  # The server expects { "storageVolume": { "tenant": { "id": <id> } } }
+  # and handles all authorization and business-rule validation.
+  def update_tenant(id, payload, params={}, headers={})
+    validate_id!(id)
+    execute(method: :put, url: "#{base_path}/#{CGI::escape(id.to_s)}", params: params, payload: payload, headers: headers)
+  end
+
 end

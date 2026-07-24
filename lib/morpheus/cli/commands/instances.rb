@@ -315,7 +315,7 @@ class Morpheus::Cli::Instances
           }
           row
         }
-        columns = [:id, {:name => {:max_width => 50}}, :tenant, :group, :cloud, 
+        columns = [:id, {:name => {:max_width => 50}}, :labels, :tenant, :group, :cloud, 
             :type, :version, :environment, :plan,
             {:created => {:display_name => "CREATED"}}, 
             {:user => {:display_name => "OWNER", :max_width => 20}}, 
