@@ -3745,16 +3745,14 @@ class Morpheus::Cli::Clusters
       opts.banner = subcommand_usage("[cluster]")
       build_standard_list_options(opts, options)
       opts.footer = "List active MUST-rule affinity violations.\n" +
-        "[cluster] is optional. Pass a cluster name or id to scope the results."
+        "[cluster] is required. This is the name or id of an existing cluster."
     end
     optparse.parse!(args)
-    verify_args!(args:args, optparse:optparse, min:0, max:1)
+    verify_args!(args:args, optparse:optparse, count:1)
     connect(options)
-    if args[0]
-      cluster = find_cluster_by_name_or_id(args[0])
-      return 1 if cluster.nil?
-      params['clusterId'] = cluster['id']
-    end
+    cluster = find_cluster_by_name_or_id(args[0])
+    return 1 if cluster.nil?
+    params['clusterId'] = cluster['id']
     params.merge!(parse_list_options(options))
     @clusters_interface.setopts(options)
     if options[:dry_run]
