@@ -184,7 +184,15 @@ EOT
         if avail_backup_types.empty?
           raise_command_error "No available backup types found"
         else
-          params['backupType'] = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'backupType', 'fieldLabel' => 'Backup Type', 'type' => 'select', 'selectOptions' => avail_backup_types, 'defaultValue' => avail_backup_types[0] ? avail_backup_types[0]['name'] : nil, 'required' => true}], options[:options], @api_client)['backupType']  
+          params['backupType'] = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'backupType', 'fieldLabel' => 'Backup Type', 'type' => 'select', 'selectOptions' => avail_backup_types, 'defaultValue' => avail_backup_types[0] ? avail_backup_types[0]['name'] : nil, 'required' => true}], options[:options], @api_client)['backupType']
+          # BackupType Options Types
+          selected_backupType_optionTypes = create_results.dig('optionTypes', params['backupType']) || []
+          if !selected_backupType_optionTypes.empty?
+            selected_backupType_optionTypes.each do |optiontype|
+              build_selected_backupType_optionTypes(optiontype, params, options)
+            end
+          end
+
         end
 
         # Job / Schedule
@@ -524,6 +532,48 @@ EOT
     end
 
     job_inputs
+  end
+
+  def build_selected_backupType_optionTypes(optiontype, params, options={}, api_client=@api_client)
+    #puts "Prompting for #{optiontype['fieldName']} of type #{optiontype['type']}"
+    prompt_options = options[:options] || {}
+    if ['select', 'multiSelect'].include?(optiontype['type'])
+      select_options = nil
+      if optiontype['selectOptions']
+        if optiontype['selectOptions'].is_a?(Proc)
+          select_options = optiontype['selectOptions'].call(api_client, {})
+        else
+          select_options = optiontype['selectOptions']
+        end
+      elsif optiontype['optionSource']
+        if optiontype['optionSource'].is_a?(Proc)
+          select_options = optiontype['optionSource'].call(api_client, {})
+        else
+          select_options = Morpheus::Cli::OptionTypes.load_source_options(optiontype['optionSource'], optiontype['optionSourceType'], api_client, {})
+        end
+      end
+
+      if select_options.is_a?(Array)
+        value_field = (optiontype['config'] ? optiontype['config']['valueField'] : nil) || 'value'
+        valid_options = select_options.select do |it|
+          next false unless it.is_a?(Hash)
+          next false if it['isGroup'] == true
+          !it[value_field].to_s.strip.empty?
+        end
+        if valid_options.empty?
+          no_options_message = select_options.find {|it| it.is_a?(Hash) && !it['name'].to_s.strip.empty? }
+          no_options_message = no_options_message ? no_options_message['name'] : nil
+          if optiontype['required']
+            raise_command_error(no_options_message || "No available options found for #{optiontype['fieldLabel'] || optiontype['fieldName']}")
+          else
+            return nil
+          end
+        end
+      end
+    end
+
+    prompt_result = Morpheus::Cli::OptionTypes.prompt([optiontype], prompt_options, api_client)
+    params[optiontype['fieldName']] = prompt_result[optiontype['fieldName']] if prompt_result
   end
 
   def backup_list_column_definitions()
