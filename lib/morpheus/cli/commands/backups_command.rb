@@ -189,7 +189,7 @@ EOT
           selected_backupType_optionTypes = create_results.dig('optionTypes', params['backupType']) || []
           if !selected_backupType_optionTypes.empty?
             selected_backupType_optionTypes.each do |optiontype|
-              build_selected_backupType_optionTypes(optiontype, params, options)
+              build_selected_backupType_optionTypes(optiontype, params, options, @api_client, create_results)
             end
           end
 
@@ -534,22 +534,58 @@ EOT
     job_inputs
   end
 
-  def build_selected_backupType_optionTypes(optiontype, params, options={}, api_client=@api_client)
+  def build_selected_backupType_optionTypes(optiontype, params, options={}, api_client=@api_client, source_context={})
     #puts "Prompting for #{optiontype['fieldName']} of type #{optiontype['type']}"
     prompt_options = options[:options] || {}
+    source_params = {'optionTypeId' => optiontype['id']}
+
+    context_backup = {}
+    if source_context.is_a?(Hash)
+      if source_context['backup'].is_a?(Hash)
+        context_backup.deep_merge!(source_context['backup'])
+      end
+      # Keep root level values too since the option endpoint may use either form.
+      %w[locationType zoneId providerId].each do |field|
+        source_params[field] = source_context[field] unless source_context[field].nil?
+      end
+    end
+    context_backup.deep_merge!(params)
+
+    if context_backup['server'].is_a?(Hash)
+      context_backup['serverId'] = context_backup['server']['id'] if context_backup['serverId'].nil? && context_backup['server']['id']
+      context_backup['server'] = context_backup['server']['name'] if context_backup['server']['name']
+    end
+    if context_backup['instance'].is_a?(Hash)
+      context_backup['instanceId'] = context_backup['instance']['id'] if context_backup['instanceId'].nil? && context_backup['instance']['id']
+      context_backup['instance'] = context_backup['instance']['name'] if context_backup['instance']['name']
+    end
+    if context_backup['backupJob'].is_a?(Hash)
+      context_backup['jobId'] = context_backup['backupJob']['id'] if context_backup['jobId'].nil? && context_backup['backupJob']['id']
+      context_backup['job'] = context_backup['backupJob']['name'] if context_backup['job'].nil? && context_backup['backupJob']['name']
+    end
+
+    source_params['locationType'] = context_backup['locationType'] if source_params['locationType'].nil? && context_backup['locationType']
+    source_params['zoneId'] = context_backup['zoneId'] if source_params['zoneId'].nil? && context_backup['zoneId']
+    source_params['providerId'] = context_backup['providerId'] if source_params['providerId'].nil? && context_backup['providerId']
+
+    context_backup.each do |k, v|
+      next if v.nil?
+      source_params["backup.#{k}"] = v
+    end
+
     if ['select', 'multiSelect'].include?(optiontype['type'])
       select_options = nil
       if optiontype['selectOptions']
         if optiontype['selectOptions'].is_a?(Proc)
-          select_options = optiontype['selectOptions'].call(api_client, {})
+          select_options = optiontype['selectOptions'].call(api_client, source_params)
         else
           select_options = optiontype['selectOptions']
         end
       elsif optiontype['optionSource']
         if optiontype['optionSource'].is_a?(Proc)
-          select_options = optiontype['optionSource'].call(api_client, {})
+          select_options = optiontype['optionSource'].call(api_client, source_params)
         else
-          select_options = Morpheus::Cli::OptionTypes.load_source_options(optiontype['optionSource'], optiontype['optionSourceType'], api_client, {})
+          select_options = Morpheus::Cli::OptionTypes.load_source_options(optiontype['optionSource'], optiontype['optionSourceType'], api_client, source_params)
         end
       end
 
@@ -572,8 +608,17 @@ EOT
       end
     end
 
-    prompt_result = Morpheus::Cli::OptionTypes.prompt([optiontype], prompt_options, api_client)
-    params[optiontype['fieldName']] = prompt_result[optiontype['fieldName']] if prompt_result
+    prompt_result = Morpheus::Cli::OptionTypes.prompt([optiontype], prompt_options, api_client, source_params)
+    if prompt_result
+      field_name = optiontype['fieldName']
+      field_context = optiontype['fieldContext']
+      selected_value = nil
+      if field_context && !field_context.to_s.strip.empty?
+        selected_value = prompt_result.dig(field_context, field_name)
+      end
+      selected_value = prompt_result[field_name] if selected_value.nil?
+      params[field_name] = selected_value unless selected_value.nil?
+    end
   end
 
   def backup_list_column_definitions()
