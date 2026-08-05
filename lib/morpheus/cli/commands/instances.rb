@@ -3969,7 +3969,7 @@ List snapshots for an instance.
 
     optparse = Morpheus::Cli::OptionParser.new do |opts|
      opts.banner = subcommand_usage("[instance]")
-      opts.on("--snapshot ID", String, "Optional snapshot") do |val|
+      opts.on("--snapshot ID", String, "Snapshot ID") do |val|
         snapshot_id = val
       end
       build_common_options(opts, options, [:auto_confirm, :json, :dry_run, :remote])
