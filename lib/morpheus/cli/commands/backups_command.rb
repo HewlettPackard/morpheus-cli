@@ -535,7 +535,6 @@ EOT
   end
 
   def build_selected_backupType_optionTypes(optiontype, params, options={}, api_client=@api_client, source_context={})
-    #puts "Prompting for #{optiontype['fieldName']} of type #{optiontype['type']}"
     prompt_options = options[:options] || {}
     source_params = {'optionTypeId' => optiontype['id']}
 
@@ -608,7 +607,16 @@ EOT
       end
     end
 
-    prompt_result = Morpheus::Cli::OptionTypes.prompt([optiontype], prompt_options, api_client, source_params)
+    prompt_optiontype = optiontype.is_a?(Hash) ? optiontype.clone : optiontype
+    # This helper prompts one option type at a time, so dependency checks against sibling
+    # option types (dependsOnCode) can incorrectly skip valid prompts.
+    if prompt_optiontype.is_a?(Hash) && !prompt_optiontype['dependsOnCode'].to_s.empty?
+      prompt_optiontype['dependsOnCode'] = nil
+    end
+
+    puts "Prompting with optiontype: #{prompt_optiontype.to_json} and prompt options: #{prompt_options.to_json}"
+    prompt_result = Morpheus::Cli::OptionTypes.prompt([prompt_optiontype], prompt_options, api_client, source_params)
+    puts "Prompt Result: #{prompt_result.to_json}"
     if prompt_result
       field_name = optiontype['fieldName']
       field_context = optiontype['fieldContext']
