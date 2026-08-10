@@ -359,7 +359,7 @@ EOT
       # Prompt for backup
       if backup.nil?
         # Backup
-        available_backups = @backups_interface.list({max:10000})['backups'].collect {|it| {'name' => it['name'], 'value' => it['id']}}
+        available_backups = @backups_interface.list({max:10000, allProvider: true})['backups'].collect {|it| {'name' => it['name'], 'value' => it['id']}}
         backup_id = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'backupId', 'fieldLabel' => 'Backup', 'type' => 'select', 'selectOptions' => available_backups, 'required' => true}], options[:options], @api_client)['backupId']
         backup = find_backup_by_name_or_id(backup_id)
         return 1 if backup.nil?
@@ -614,7 +614,6 @@ EOT
       prompt_optiontype['dependsOnCode'] = nil
     end
 
-    puts "Prompting with optiontype: #{prompt_optiontype.to_json} and prompt options: #{prompt_options.to_json}"
     prompt_result = Morpheus::Cli::OptionTypes.prompt([prompt_optiontype], prompt_options, api_client, source_params)
     puts "Prompt Result: #{prompt_result.to_json}"
     if prompt_result
