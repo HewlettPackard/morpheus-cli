@@ -107,6 +107,7 @@ EOT
   end
 
   def add(args)
+    # TODO: Make fetch calls here
     options = {}
     params = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
@@ -320,6 +321,7 @@ EOT
   end
 
   def restore(args)
+    #TODO: Make fetch calls here 
     options = {}
     params = {}
     payload = {}
