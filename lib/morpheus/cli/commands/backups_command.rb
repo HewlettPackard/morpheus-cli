@@ -615,7 +615,6 @@ EOT
     end
 
     prompt_result = Morpheus::Cli::OptionTypes.prompt([prompt_optiontype], prompt_options, api_client, source_params)
-    puts "Prompt Result: #{prompt_result.to_json}"
     if prompt_result
       field_name = optiontype['fieldName']
       field_context = optiontype['fieldContext']
