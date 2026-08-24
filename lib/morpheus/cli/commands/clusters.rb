@@ -31,6 +31,8 @@ class Morpheus::Cli::Clusters
   register_subcommands :list_replicasets, :list_daemonsets, :list_endpoints, :list_ingresses, :list_policies, :list_volumes, :list_volume_claims, :list_config_maps, :list_secrets
   register_subcommands :get_pod, :get_deployment, :get_replicaset, :get_daemonset, :get_endpoint, :get_ingress, :get_policy, :get_volume_claim, :get_volume, :get_config_map, :get_secret, :get_stateful_set, :get_job, :get_service
   register_subcommands :list_affinity_groups, :get_affinity_group, :update_affinity_group, :add_affinity_group, :remove_affinity_group
+  register_subcommands :'list-affinity-group-violations' => :list_affinity_group_violations
+  register_subcommands :list_host_vm_groups, :get_host_vm_group, :add_host_vm_group, :update_host_vm_group, :remove_host_vm_group
 
   def connect(opts)
     @api_client = establish_remote_appliance_connection(opts)
@@ -3363,10 +3365,11 @@ class Morpheus::Cli::Clusters
           "ID" => 'id',
           "Name" => 'name',
           "Type" => lambda {|it| format_affinity_type(it['affinityType']) },
+          "VM Group" => lambda {|it| it['vmGroup'] ? (it['vmGroup']['name'] || it['vmGroup']['id']) : '' },
+          "Host Group" => lambda {|it| it['hostGroup'] ? (it['hostGroup']['name'] || it['hostGroup']['id']) : '' },
           "Resource Pool" => lambda {|it| it['pool'] ? (it['pool']['name'] || it['pool']['id']) : '' },
           "Visibility" => lambda {|it| it['visibility'].to_s.capitalize },
-          "Servers" => lambda {|it| it['servers'].size() },
-          # "Source" => lambda {|it| it['source'] },
+          "Servers" => lambda {|it| (it['servers'] || []).size },
         }.upcase_keys!
         print as_pretty_table(affinity_groups, columns, options)
         print_results_pagination(json_response)
@@ -3414,14 +3417,18 @@ class Morpheus::Cli::Clusters
         "ID" => 'id',
         "Name" => 'name',
         "Type" => lambda {|it| format_affinity_type(it['affinityType']) },
+        "Ref Type" => 'refType',
+        "Ref ID" => 'refId',
+        "VM Group" => lambda {|it| it['vmGroup'] ? (it['vmGroup']['name'] || it['vmGroup']['id']) : '' },
+        "Host Group" => lambda {|it| it['hostGroup'] ? (it['hostGroup']['name'] || it['hostGroup']['id']) : '' },
         "Resource Pool" => lambda {|it| it['pool'] ? (it['pool']['name'] || it['pool']['id']) : '' },
         "Visibility" => lambda {|it| it['visibility'].to_s.capitalize },
-        "Servers" => lambda {|it| it['servers'].size() },
+        "Servers" => lambda {|it| (it['servers'] || []).size },
         "Source" => lambda {|it| it['source'] },
         "Active" => lambda {|it| format_boolean(it['active']) },
       }
       print_description_list(columns, affinity_group)
-      if affinity_group['servers'].size > 0
+      if affinity_group['servers'] && affinity_group['servers'].size > 0
         print_h2 "Servers", options
         print as_pretty_table(affinity_group['servers'], [:id, :name], options)
       end
@@ -3435,6 +3442,18 @@ class Morpheus::Cli::Clusters
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage( "[cluster] [name] [options]")
       build_option_type_options(opts, options, add_affinity_group_option_types)
+      opts.on('--vm-group ID', String, "VM Group ID (for VM-to-Host rules)") do |val|
+        options[:options] ||= {}
+        options[:options]['vmGroup'] = {'id' => val.to_i}
+      end
+      opts.on('--host-group ID', String, "Host Group ID (for VM-to-Host rules)") do |val|
+        options[:options] ||= {}
+        options[:options]['hostGroup'] = {'id' => val.to_i}
+      end
+      opts.on('--servers ID1,ID2', Array, "Server IDs (for VM-to-VM rules)") do |val|
+        options[:options] ||= {}
+        options[:options]['servers'] = val.map {|s| {'id' => s.to_i}}
+      end
       add_perms_options(opts, options, ['plans'])
       build_standard_add_options(opts, options)
       opts.footer = "Add affinity group to a cluster.\n" +
@@ -3450,6 +3469,7 @@ class Morpheus::Cli::Clusters
       cluster = find_cluster_by_name_or_id(args[0])
       return 1 if cluster.nil?
       if args[1]
+        options[:options] ||= {}
         options[:options]['name']  = args[1]
       end
       if options[:payload]
@@ -3465,13 +3485,72 @@ class Morpheus::Cli::Clusters
         option_types = add_affinity_group_option_types
         affinity_group = Morpheus::Cli::OptionTypes.prompt(option_types, options[:options], @api_client, options[:params])
 
-        # affinity_group_type = find_affinity_group_type_by_code(affinity_group['affinityGroupType'])
-        # affinity_group['affinityGroupType'] = {id:affinity_group_type['id']}
+        # Rule shape — servers OR vmGroup+hostGroup. Skip if already provided via CLI flags/-O or --payload merge.
+        preset_servers = options[:options] && options[:options].key?('servers')
+        preset_vmhost  = options[:options] && options[:options].key?('vmGroup') && options[:options].key?('hostGroup')
+        unless preset_servers || preset_vmhost
+          form_opts = @clusters_interface.affinity_group_form_options(cluster['id']) rescue {}
+          available_servers    = form_opts['availableServers']    || []
+          available_vm_groups  = form_opts['availableVmGroups']   || []
+          available_host_groups = form_opts['availableHostGroups'] || []
 
-        # # affinity_group type options
-        # unless affinity_group_type['optionTypes'].empty?
-        #   affinity_group.merge!(Morpheus::Cli::OptionTypes.prompt(affinity_group_type['optionTypes'], options[:options].deep_merge({:context_map => {'domain' => ''}, :checkbox_as_boolean => true}), @api_client, options[:params]))
-        # end
+          shape_options = [{'name' => 'VM-to-VM (pick servers)', 'value' => 'vmToVm'}]
+          if !available_vm_groups.empty? && !available_host_groups.empty?
+            shape_options << {'name' => 'VM-to-Host (pick groups)', 'value' => 'vmToHost'}
+          end
+          shape = if shape_options.size == 1
+            'vmToVm'
+          else
+            Morpheus::Cli::OptionTypes.prompt([{
+              'fieldName' => 'shape', 'fieldLabel' => 'Rule Shape', 'type' => 'select', 'required' => true,
+              'defaultValue' => 'vmToVm', 'selectOptions' => shape_options
+            }], options[:options], @api_client, options[:params])['shape']
+          end
+
+          if shape == 'vmToVm'
+            if available_servers.empty?
+              # Fall back to the classic multiTypeahead prompt when the form-options endpoint returns nothing
+              server_prompt = Morpheus::Cli::OptionTypes.prompt([
+                {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers', 'searchParameter' => 'phrase', 'description' => 'Select servers to be in the affinity group.'}
+              ], options[:options], @api_client, options[:params])
+              affinity_group['servers'] = server_prompt['servers'] if server_prompt['servers']
+            else
+              print cyan, "Available Servers:", reset, "\n"
+              available_servers.each {|s| print "  #{s['id']}\t#{s['name']}\n" }
+              raw = Morpheus::Cli::OptionTypes.prompt([{
+                'fieldName' => 'servers', 'fieldLabel' => 'Servers (comma-separated IDs)', 'type' => 'text', 'required' => true,
+                'description' => 'Server IDs to include, comma-separated'
+              }], options[:options], @api_client, options[:params])['servers']
+              selected_ids = raw.to_s.split(',').map(&:strip).reject(&:empty?).map(&:to_i)
+              valid_ids = available_servers.map {|s| s['id'].to_i}
+              invalid = selected_ids - valid_ids
+              if !invalid.empty?
+                print_red_alert "Invalid server IDs for this cluster: #{invalid.join(', ')}"
+                return 1
+              end
+              if selected_ids.empty?
+                print_red_alert "At least one server ID is required"
+                return 1
+              end
+              affinity_group['servers'] = selected_ids.map {|id| {'id' => id}}
+            end
+          else
+            vm_group_id = Morpheus::Cli::OptionTypes.prompt([{
+              'fieldName' => 'vmGroup', 'fieldLabel' => 'VM Group', 'type' => 'select', 'required' => true,
+              'selectOptions' => available_vm_groups.map {|g| {'name' => g['name'], 'value' => g['id']} }
+            }], options[:options], @api_client, options[:params])['vmGroup']
+            host_group_id = Morpheus::Cli::OptionTypes.prompt([{
+              'fieldName' => 'hostGroup', 'fieldLabel' => 'Host Group', 'type' => 'select', 'required' => true,
+              'selectOptions' => available_host_groups.map {|g| {'name' => g['name'], 'value' => g['id']} }
+            }], options[:options], @api_client, options[:params])['hostGroup']
+            affinity_group['vmGroup']   = {'id' => vm_group_id.to_i}
+            affinity_group['hostGroup'] = {'id' => host_group_id.to_i}
+          end
+        else
+          affinity_group['servers']   = options[:options]['servers']   if preset_servers
+          affinity_group['vmGroup']   = options[:options]['vmGroup']   if preset_vmhost
+          affinity_group['hostGroup'] = options[:options]['hostGroup'] if preset_vmhost
+        end
 
         # perms
         perms = prompt_permissions(options, is_master_account ? ['plans'] : ['plans', 'visibility', 'tenants'])
@@ -3654,6 +3733,367 @@ class Morpheus::Cli::Clusters
         end
       else
         print_red_alert "Failed to remove cluster affinity_group #{json_response['msg']}"
+      end
+    end
+    return 0, nil
+  end
+
+  def list_affinity_group_violations(args)
+    options = {}
+    params = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[cluster]")
+      build_standard_list_options(opts, options)
+      opts.footer = "List active MUST-rule affinity violations.\n" +
+        "[cluster] is required. This is the name or id of an existing cluster."
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:1)
+    connect(options)
+    cluster = find_cluster_by_name_or_id(args[0])
+    return 1 if cluster.nil?
+    params['clusterId'] = cluster['id']
+    params.merge!(parse_list_options(options))
+    @clusters_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @clusters_interface.dry.affinity_group_violations(params)
+      return
+    end
+    json_response = @clusters_interface.affinity_group_violations(params)
+    render_response(json_response, options, 'violations') do
+      rows = json_response['violations'] || []
+      print_h1 "Affinity Rule Violations", parse_list_subtitles(options), options
+      if rows.empty?
+        print cyan, "No violations.", reset, "\n"
+      else
+        columns = {
+          "Rule" => 'ruleName',
+          "Type" => lambda {|r| r['keepTogether'] ? 'Keep Together' : 'Keep Separate' },
+          "VMs" => lambda {|r| (r['affectedVms'] || []).map {|v| v['name']}.join(', ') },
+          "Occurred" => 'occurredAt'
+        }.upcase_keys!
+        print as_pretty_table(rows, columns, options)
+      end
+      print reset, "\n"
+    end
+    return 0, nil
+  end
+
+  def list_host_vm_groups(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[cluster]")
+      build_standard_list_options(opts, options)
+      opts.footer = "List host/VM groups on a cluster.\n" +
+        "[cluster] is required. This is the name or id of an existing cluster."
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:1)
+    connect(options)
+    cluster = find_cluster_by_name_or_id(args[0])
+    return 1 if cluster.nil?
+    params = {}
+    params.merge!(parse_list_options(options))
+    @clusters_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @clusters_interface.dry.list_host_vm_groups(cluster['id'], params)
+      return
+    end
+    json_response = @clusters_interface.list_host_vm_groups(cluster['id'], params)
+    render_response(json_response, options, 'hostVmGroups') do
+      rows = json_response['hostVmGroups'] || []
+      print_h1 "Morpheus Cluster Host/VM Groups: #{cluster['name']}", parse_list_subtitles(options), options
+      if rows.empty?
+        print cyan, "No host/VM groups found.", reset, "\n"
+      else
+        columns = {
+          "ID" => 'id',
+          "Name" => 'name',
+          "Type" => lambda {|it| format_host_vm_group_type(it['type']) },
+          "Servers" => lambda {|it| (it['servers'] || []).size },
+          "Visibility" => lambda {|it| it['visibility'].to_s.capitalize },
+        }.upcase_keys!
+        print as_pretty_table(rows, columns, options)
+        print_results_pagination(json_response)
+      end
+      print reset, "\n"
+    end
+    return 0, nil
+  end
+
+  def get_host_vm_group(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[cluster] [host-vm-group]")
+      build_standard_get_options(opts, options)
+      opts.footer = "Get details about a cluster host/VM group.\n" +
+        "[cluster] is required. This is the name or id of an existing cluster.\n" +
+        "[host-vm-group] is required. This is the name or id of an existing host/VM group."
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:2)
+    connect(options)
+    cluster = find_cluster_by_name_or_id(args[0])
+    return 1 if cluster.nil?
+    host_vm_group = find_cluster_host_vm_group_by_name_or_id(cluster['id'], args[1])
+    if host_vm_group.nil?
+      print_red_alert "Host/VM Group not found for '#{args[1]}'"
+      exit 1
+    end
+    params = {}
+    params.merge!(parse_query_options(options))
+    @clusters_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @clusters_interface.dry.get_host_vm_group(cluster['id'], host_vm_group['id'], params)
+      return
+    end
+    json_response = @clusters_interface.get_host_vm_group(cluster['id'], host_vm_group['id'], params)
+    render_response(json_response, options, 'hostVmGroup') do
+      row = json_response['hostVmGroup']
+      print_h1 "Host/VM Group Details", [], options
+      columns = {
+        "ID" => 'id',
+        "Name" => 'name',
+        "Type" => lambda {|it| format_host_vm_group_type(it['type']) },
+        "Ref Type" => 'refType',
+        "Ref ID" => 'refId',
+        "Servers" => lambda {|it| (it['servers'] || []).size },
+        "Visibility" => lambda {|it| it['visibility'].to_s.capitalize },
+        "Active" => lambda {|it| format_boolean(it['active']) },
+      }
+      print_description_list(columns, row)
+      if row['servers'] && row['servers'].size > 0
+        print_h2 "Servers", options
+        print as_pretty_table(row['servers'], [:id, :name], options)
+      end
+      print reset, "\n"
+    end
+    return 0, nil
+  end
+
+  def add_host_vm_group(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[cluster] [name] [options]")
+      build_option_type_options(opts, options, add_host_vm_group_option_types)
+      opts.on('--servers ID1,ID2', Array, "Server IDs to include") do |val|
+        options[:options] ||= {}
+        options[:options]['servers'] = val.map {|s| {'id' => s.to_i}}
+      end
+      add_perms_options(opts, options, ['plans'])
+      build_standard_add_options(opts, options)
+      opts.footer = "Add a host/VM group to a cluster.\n" +
+        "[cluster] is required. This is the name or id of an existing cluster.\n" +
+        "[name] is required. This is the name of the new host/VM group."
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, min:1, max:2)
+    connect(options)
+
+    begin
+      cluster = find_cluster_by_name_or_id(args[0])
+      return 1 if cluster.nil?
+      if args[1]
+        options[:options] ||= {}
+        options[:options]['name'] = args[1]
+      end
+      if options[:payload]
+        payload = options[:payload]
+        if options[:options]
+          payload ||= {}
+          payload.deep_merge!(options[:options].reject {|k,v| k.is_a?(Symbol) })
+        end
+      else
+        options[:params] ||= {}
+        options[:params].merge!({:serverGroupId => cluster['id']})
+        option_types = add_host_vm_group_option_types
+        host_vm_group = Morpheus::Cli::OptionTypes.prompt(option_types, options[:options], @api_client, options[:params])
+
+        # Servers — form-options driven, filtered by chosen type
+        unless options[:options] && options[:options].key?('servers')
+          form_opts = @clusters_interface.host_vm_group_form_options(cluster['id'], {'hostVmGroupType' => host_vm_group['type']}) rescue {}
+          available_servers = form_opts['availableServers'] || []
+          if available_servers.empty?
+            print_red_alert "No servers available on cluster #{cluster['name']} for type #{host_vm_group['type']}"
+            return 1
+          end
+          print cyan, "Available Servers:", reset, "\n"
+          available_servers.each {|s| print "  #{s['id']}\t#{s['name']}\n" }
+          raw = Morpheus::Cli::OptionTypes.prompt([{
+            'fieldName' => 'servers', 'fieldLabel' => 'Servers (comma-separated IDs)', 'type' => 'text', 'required' => true,
+            'description' => 'Server IDs to include, comma-separated'
+          }], options[:options], @api_client, options[:params])['servers']
+          selected_ids = raw.to_s.split(',').map(&:strip).reject(&:empty?).map(&:to_i)
+          valid_ids = available_servers.map {|s| s['id'].to_i}
+          invalid = selected_ids - valid_ids
+          if !invalid.empty?
+            print_red_alert "Invalid server IDs for this cluster/type: #{invalid.join(', ')}"
+            return 1
+          end
+          if selected_ids.empty?
+            print_red_alert "At least one server ID is required"
+            return 1
+          end
+          host_vm_group['servers'] = selected_ids.map {|id| {'id' => id}}
+        else
+          host_vm_group['servers'] = options[:options]['servers']
+        end
+
+        perms = prompt_permissions(options, is_master_account ? ['plans'] : ['plans', 'visibility', 'tenants'])
+        host_vm_group['resourcePermissions'] = perms['resourcePermissions'] unless perms['resourcePermissions'].nil?
+        host_vm_group['tenants'] = perms['tenantPermissions'] unless perms['tenantPermissions'].nil? || perms['tenantPermissions']['accounts'].empty?
+        host_vm_group['visibility'] = perms['resourcePool']['visibility'] if !perms['resourcePool'].nil? && !perms['resourcePool']['visibility'].nil?
+
+        payload = {'hostVmGroup' => host_vm_group}
+      end
+
+      @clusters_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @clusters_interface.dry.create_host_vm_group(cluster['id'], payload)
+        return
+      end
+      json_response = @clusters_interface.create_host_vm_group(cluster['id'], payload)
+      if options[:json]
+        puts as_json(json_response)
+      else
+        if json_response['success']
+          print_green_success (json_response['msg'] || "Added host/VM group to cluster #{cluster['name']}")
+        else
+          print_red_alert "Failed to create host/VM group #{json_response['msg']}"
+        end
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def update_host_vm_group(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[cluster] [host-vm-group] [options]")
+      build_option_type_options(opts, options, update_host_vm_group_option_types)
+      opts.on('--servers ID1,ID2', Array, "Replace server IDs") do |val|
+        options[:options] ||= {}
+        options[:options]['servers'] = val.map {|s| {'id' => s.to_i}}
+      end
+      opts.on('--visibility VISIBILITY', String, "Visibility: private | public") do |val|
+        options[:options] ||= {}
+        options[:options]['visibility'] = val
+      end
+      add_perms_options(opts, options, ['plans'])
+      build_standard_update_options(opts, options)
+      opts.footer = "Update a cluster host/VM group.\n" +
+        "[cluster] is required. This is the name or id of an existing cluster.\n" +
+        "[host-vm-group] is required. This is the name or id of an existing host/VM group."
+    end
+    optparse.parse!(args)
+    if args.count != 2
+      raise_command_error "wrong number of arguments, expected 2 and got (#{args.count}) #{args}\n#{optparse}"
+    end
+    connect(options)
+
+    begin
+      cluster = find_cluster_by_name_or_id(args[0])
+      return 1 if cluster.nil?
+      host_vm_group = find_cluster_host_vm_group_by_name_or_id(cluster['id'], args[1])
+      if host_vm_group.nil?
+        print_red_alert "Host/VM Group not found by '#{args[1]}'"
+        exit 1
+      end
+      payload = nil
+      if options[:payload]
+        payload = options[:payload]
+        if options[:options]
+          payload.deep_merge!({'hostVmGroup' => options[:options].reject {|k,v| k.is_a?(Symbol) }})
+        end
+      else
+        payload = {'hostVmGroup' => {}}
+        options[:params] ||= {}
+        options[:params].merge!({:serverGroupId => cluster['id']})
+        option_types = update_host_vm_group_option_types
+        v_prompt = Morpheus::Cli::OptionTypes.no_prompt(option_types, options[:options], @api_client, options[:params])
+        v_prompt.deep_compact!.booleanize!
+        payload.deep_merge!({'hostVmGroup' => v_prompt})
+
+        perms = prompt_permissions(options.merge({:no_prompt => true}), is_master_account ? ['plans'] : ['plans', 'visibility', 'tenants'])
+        perms_payload = {}
+        perms_payload['resourcePermissions'] = perms['resourcePermissions'] if !perms['resourcePermissions'].nil? && !perms['resourcePermissions'].empty?
+        perms_payload['tenantPermissions'] = perms['tenantPermissions'] if !perms['tenantPermissions'].nil? && !perms['tenantPermissions']['accounts'].empty?
+        payload['hostVmGroup']['permissions'] = perms_payload if !perms_payload.empty?
+        payload['hostVmGroup']['visibility'] = perms['resourcePool']['visibility'] if !perms['resourcePool'].nil? && !perms['resourcePool']['visibility'].nil?
+
+        if options[:options]
+          payload.deep_merge!({'hostVmGroup' => options[:options].reject {|k,v| k.is_a?(Symbol) || payload['hostVmGroup'].key?(k) }})
+        end
+
+        if payload['hostVmGroup'].nil? || payload['hostVmGroup'].empty?
+          raise_command_error "Specify at least one option to update.\n#{optparse}"
+        end
+      end
+
+      @clusters_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @clusters_interface.dry.update_host_vm_group(cluster['id'], host_vm_group['id'], payload)
+        return
+      end
+      json_response = @clusters_interface.update_host_vm_group(cluster['id'], host_vm_group['id'], payload)
+      if options[:json]
+        puts as_json(json_response)
+      elsif !options[:quiet]
+        updated = json_response['hostVmGroup'] || host_vm_group
+        print_green_success "Updated host/VM group #{updated['name'] || updated['id']}"
+      end
+      return 0
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
+  end
+
+  def remove_host_vm_group(args)
+    params = {}
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[cluster] [host-vm-group]")
+      build_standard_remove_options(opts, options)
+      opts.footer = "Delete a host/VM group from a cluster.\n" +
+        "[cluster] is required. This is the name or id of an existing cluster.\n" +
+        "[host-vm-group] is required. This is the name or id of an existing host/VM group."
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:2)
+    connect(options)
+    params.merge!(parse_query_options(options))
+
+    cluster = find_cluster_by_name_or_id(args[0])
+    return 1 if cluster.nil?
+    host_vm_group_id = args[1]
+    if host_vm_group_id.empty?
+      raise_command_error "missing required host/VM group parameter"
+    end
+    host_vm_group = find_cluster_host_vm_group_by_name_or_id(cluster['id'], host_vm_group_id)
+    if host_vm_group.nil?
+      print_red_alert "Host/VM Group not found for '#{host_vm_group_id}'"
+      return 1
+    end
+    unless options[:yes] || ::Morpheus::Cli::OptionTypes::confirm("Are you sure you would like to remove the cluster host/VM group '#{host_vm_group['name'] || host_vm_group['id']}'?", options)
+      return 9, "aborted command"
+    end
+    @clusters_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @clusters_interface.dry.destroy_host_vm_group(cluster['id'], host_vm_group['id'], params)
+      return
+    end
+    json_response = @clusters_interface.destroy_host_vm_group(cluster['id'], host_vm_group['id'], params)
+    if options[:json]
+      puts as_json(json_response)
+    else
+      if json_response['success']
+        print_green_success "Removed host/VM group #{host_vm_group['name']}"
+      else
+        print_red_alert "Failed to remove cluster host/VM group #{json_response['msg']}"
       end
     end
     return 0, nil
@@ -5346,22 +5786,71 @@ class Morpheus::Cli::Clusters
    def add_affinity_group_option_types
     [
       {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text', 'required' => true},
-      {'fieldName' => 'affinityType', 'fieldLabel' => 'Type', 'type' => 'select', 'selectOptions' => [{'name' => 'Keep Separate', 'value' => 'KEEP_SEPARATE'}, {'name' => 'Keep Together', 'value' => 'KEEP_TOGETHER'}], 'description' => 'Choose affinity type.', 'required' => true, 'defaultValue' => 'KEEP_SEPARATE'},
+      {'fieldName' => 'affinityType', 'fieldLabel' => 'Type', 'type' => 'select', 'selectOptions' => [
+        {'name' => 'Keep Together (Should)', 'value' => 'KEEP_TOGETHER'},
+        {'name' => 'Keep Separate (Should)', 'value' => 'KEEP_SEPARATE'},
+        {'name' => 'Keep Together (Must)',   'value' => 'KEEP_TOGETHER_MUST'},
+        {'name' => 'Keep Separate (Must)',   'value' => 'KEEP_SEPARATE_MUST'}
+      ], 'description' => 'Choose affinity type.', 'required' => true, 'defaultValue' => 'KEEP_TOGETHER'},
       {'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox', 'defaultValue' => true},
-      # {'fieldName' => 'pool.id', 'fieldLabel' => 'Cluster', 'type' => 'select', 'optionSourceType' => 'vmware', 'optionSource' => 'vmwareZonePoolClusters', 'description' => 'Select cluster for the affinity group.', 'required' => true},
-      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers', 'searchParameter' => 'phrase', 'description' => 'Select servers to be in the affinity group.'},
     ]
   end
 
   def update_affinity_group_option_types
     [
+      {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text'},
+      {'fieldName' => 'affinityType', 'fieldLabel' => 'Type', 'type' => 'select', 'selectOptions' => [
+        {'name' => 'Keep Together (Should)', 'value' => 'KEEP_TOGETHER'},
+        {'name' => 'Keep Separate (Should)', 'value' => 'KEEP_SEPARATE'},
+        {'name' => 'Keep Together (Must)',   'value' => 'KEEP_TOGETHER_MUST'},
+        {'name' => 'Keep Separate (Must)',   'value' => 'KEEP_SEPARATE_MUST'}
+      ], 'description' => 'Change affinity type.'},
       {'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox'},
       {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers', 'searchParameter' => 'phrase', 'description' => 'Select servers to be in the affinity group.'},
     ]
   end
 
   def format_affinity_type(affinity_type)
-    affinity_type == "KEEP_SEPARATE" ? "Keep Separate" : "Keep Together"
+    case affinity_type.to_s
+    when 'KEEP_SEPARATE'      then 'Keep Separate'
+    when 'KEEP_TOGETHER'      then 'Keep Together'
+    when 'KEEP_SEPARATE_MUST' then 'Keep Separate (Must)'
+    when 'KEEP_TOGETHER_MUST' then 'Keep Together (Must)'
+    else affinity_type.to_s
+    end
+  end
+
+  def add_host_vm_group_option_types
+    [
+      {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text', 'required' => true},
+      {'fieldName' => 'type', 'fieldLabel' => 'Group Type', 'type' => 'select', 'selectOptions' => [
+        {'name' => 'Host Group', 'value' => 'HOST_GROUP'},
+        {'name' => 'VM Group',   'value' => 'VM_GROUP'}
+      ], 'required' => true, 'defaultValue' => 'HOST_GROUP', 'description' => 'Choose group type.'},
+    ]
+  end
+
+  def update_host_vm_group_option_types
+    [
+      {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text'},
+    ]
+  end
+
+  def format_host_vm_group_type(type)
+    case type.to_s
+    when 'HOST_GROUP' then 'Host Group'
+    when 'VM_GROUP'   then 'VM Group'
+    else type.to_s
+    end
+  end
+
+  def find_cluster_host_vm_group_by_name_or_id(cluster_id, val)
+    if val.to_s =~ /\A\d{1,}\Z/
+      @clusters_interface.get_host_vm_group(cluster_id, val)['hostVmGroup'] rescue nil
+    else
+      list = @clusters_interface.list_host_vm_groups(cluster_id, {name: val})['hostVmGroups'] || []
+      list.first
+    end
   end
 
 end

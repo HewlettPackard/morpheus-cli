@@ -465,6 +465,10 @@ class Morpheus::Cli::Instances
       opts.on("--layout-size NUMBER", Integer, "Apply a multiply factor of containers/vms within the instance") do |val|
         options[:layout_size] = val.to_i
       end
+      opts.on("--storage-controller ARRAY", String, "Storage Controllers, JSON array of controller configs. Each entry accepts id, busNumber, typeId, typeName, removable, editable. Example: '[{\"busNumber\":\"1\",\"typeName\":\"SCSI\"}]'") do |val|
+        options[:options] ||= {}
+        options[:options]['storageController'] = JSON.parse(val)
+      end
       opts.on( '-l', '--layout LAYOUT', "Layout ID" ) do |val|
         options[:layout] = val
       end
@@ -595,6 +599,9 @@ class Morpheus::Cli::Instances
     end
     
     payload['instance'] ||= {}
+    if options[:options] && options[:options]['storageController']
+      payload['storageController'] = options[:options]['storageController']
+    end
     if options[:instance_name]
       payload['instance']['name'] = options[:instance_name]
     end
@@ -2910,6 +2917,10 @@ class Morpheus::Cli::Instances
       opts.on('--include-network-interfaces','--include-network-interfaces', "Populate payload networkInterfaces with current interfaces") do
         options[:include_nics] = true
       end
+      opts.on("--storage-controller ARRAY", String, "Storage Controllers, JSON array of controller configs. Each entry accepts id, busNumber, typeId, typeName, removable, editable.") do |val|
+        options[:options] ||= {}
+        options[:options]['storageController'] = JSON.parse(val)
+      end
       build_standard_update_options(opts, options)
     end
     optparse.parse!(args)
@@ -3958,7 +3969,7 @@ List snapshots for an instance.
 
     optparse = Morpheus::Cli::OptionParser.new do |opts|
      opts.banner = subcommand_usage("[instance]")
-      opts.on("--snapshot ID", String, "Optional snapshot") do |val|
+      opts.on("--snapshot ID", String, "Snapshot ID") do |val|
         snapshot_id = val
       end
       build_common_options(opts, options, [:auto_confirm, :json, :dry_run, :remote])

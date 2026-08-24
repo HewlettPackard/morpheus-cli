@@ -219,4 +219,12 @@ class Morpheus::ServersInterface < Morpheus::APIClient
     execute(opts)
   end
 
+
+  def create_linked_clone(id, snapshot_id, payload={})
+    url = "#{@base_url}/api/servers/#{id}/linked-clone/#{snapshot_id}"
+    headers = {:authorization => "Bearer #{@access_token}", 'Content-Type' => 'application/json' }
+    opts = {method: :put, url: url, headers: headers, payload: payload.to_json}
+    execute(opts)
+  end
+
 end

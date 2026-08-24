@@ -187,6 +187,17 @@ EOT
           params['backupType'] = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'backupType', 'fieldLabel' => 'Backup Type', 'type' => 'select', 'selectOptions' => avail_backup_types, 'defaultValue' => avail_backup_types[0] ? avail_backup_types[0]['name'] : nil, 'required' => true}], options[:options], @api_client)['backupType']  
         end
 
+        # Plugin optionTypes
+        plugin_option_type_inputs = @options_interface.options_for_source('backupOptionTypes', {'backupTypeCode' => params['backupType']} )['data']['optionTypes']
+        plugin_opt_parser = Morpheus::Cli::OptionParser.new do |opts|
+          build_option_type_options(opts, options, plugin_option_type_inputs)
+        end
+
+        plugin_opt_parser.parse!(args)
+        v_prompt = Morpheus::Cli::OptionTypes.prompt(plugin_option_type_inputs, options[:options].deep_merge({:context_map => {'domain' => 'backup'}}), @api_client)
+        v_prompt.deep_compact!.booleanize! # remove empty values and convert checkbox "on" and "off" to true and false
+        params.merge!(v_prompt.delete('backup'))
+
         # Job / Schedule
         params['jobAction'] = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'jobAction', 'fieldLabel' => 'Backup Job Type', 'type' => 'select', 'optionSource' => 'backupJobActions', 'required' => true, 'defaultValue' => 'new'}], options[:options], @api_client)['jobAction']
         if params['jobAction'] == 'new'

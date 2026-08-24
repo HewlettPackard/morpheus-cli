@@ -15,7 +15,7 @@ class Morpheus::Cli::Hosts
                        :wiki, :update_wiki,
                        :maintenance, :leave_maintenance, :placement,
                        :list_devices, :assign_device, :detach_device, :attach_device,
-                       :snapshot
+                       :snapshot, :create_linked_clone
   alias_subcommand :details, :get
   set_default_subcommand :list
 
@@ -796,6 +796,10 @@ class Morpheus::Cli::Hosts
       opts.on("--security-groups LIST", Integer, "Security Groups, comma separated list of security group IDs") do |val|
         options[:security_groups] = val.split(",").collect {|s| s.strip }.select {|s| !s.to_s.empty? }
       end
+      opts.on("--storage-controller ARRAY", String, "Storage Controllers, JSON array of controller configs. Each entry accepts id, busNumber, typeId, typeName, removable, editable.") do |val|
+        options[:options] ||= {}
+        options[:options]['storageController'] = JSON.parse(val)
+      end
       opts.on('--tags LIST', String, "Metadata tags in the format 'ping=pong,flash=bang'") do |val|
         options[:metadata] = val
       end
@@ -954,6 +958,10 @@ class Morpheus::Cli::Hosts
           volumes = prompt_volumes(service_plan, provision_type, options, @api_client, {zoneId: cloud_id, serverTypeId: server_type['id'], siteId: group_id})
           if !volumes.empty?
             payload['volumes'] = volumes
+          end
+
+          if options[:options] && options[:options]['storageController']
+            payload['storageController'] = options[:options]['storageController']
           end
 
           # plan customizations
@@ -1347,6 +1355,10 @@ class Morpheus::Cli::Hosts
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[name]")
+      opts.on("--storage-controller ARRAY", String, "Storage Controllers, JSON array of controller configs. Each entry accepts id, busNumber, typeId, typeName, removable, editable.") do |val|
+        options[:options] ||= {}
+        options[:options]['storageController'] = JSON.parse(val)
+      end
       build_common_options(opts, options, [:options, :json, :dry_run, :quiet, :remote])
     end
     optparse.parse!(args)
@@ -1435,6 +1447,9 @@ class Morpheus::Cli::Hosts
       # only amazon supports this option
       # for now, always do this
       payload[:deleteOriginalVolumes] = true
+      if options[:options] && options[:options]['storageController']
+        payload[:storageController] = options[:options]['storageController']
+      end
       @servers_interface.setopts(options)
       if options[:dry_run]
         print_dry_run @servers_interface.dry.resize(server['id'], payload)
@@ -2714,6 +2729,62 @@ EOT
       end
     end
     return 0, nil
+  end
+
+  def create_linked_clone(args)
+    options = {}
+    server = nil
+    snapshot_id = nil
+
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[host]")
+      opts.on("--snapshot ID", String, "Snapshot ID") do |val|
+        snapshot_id = val
+      end
+      build_common_options(opts, options, [:auto_confirm, :json, :dry_run, :remote])
+      opts.footer = "Create a linked clone using the selected snapshot of a Host." + "\n" +
+                    "[snapshotId] is required. This is the id of the snapshot which the clone will refer to."
+    end
+
+    optparse.parse!(args)
+    if args.count != 1
+      raise_command_error "wrong number of arguments, expected 1 and got (#{args.count}) #{args.join(' ')}\n#{optparse}"
+    end
+    connect(options)
+    begin
+      server = find_host_by_name_or_id(args[0])
+      options[:options]['serverId'] = server['id']
+      begin
+        snapshot_options = @servers_interface.snapshots(server['id'], {})['snapshots'].collect {|it| {'name' => "#{it['name']} (#{it['id']})", 'value' => it['id']} }        
+        snapshot_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'snapshotId', 'type' => 'select', 'fieldLabel' => 'Snapshot', 'selectOptions' => snapshot_options, 'required' => true, 'description' => 'Select Snapshot.'}], {}, @api_client, options[:options])
+
+        if !snapshot_prompt['snapshotId'].to_s.empty?
+          snapshot_id = snapshot_prompt['snapshotId']
+        end
+      rescue RestClient::Exception => e
+        puts "Failed to load host snapshots"
+      end
+
+      @servers_interface.setopts(options)
+
+      payload = {}
+      if options[:dry_run]
+        print_dry_run @servers_interface.dry.create_linked_clone(server['id'], snapshot_id, payload)
+        return
+      end
+
+      json_response = @servers_interface.create_linked_clone(server['id'], snapshot_id, payload)
+      if options[:json]
+        puts as_json(json_response, options)
+      else
+        print_green_success "Linked Clone creation initiated."
+      end
+      return 0
+
+    rescue RestClient::Exception => e
+      print_rest_exception(e, options)
+      exit 1
+    end
   end
 
     ## Server Devices

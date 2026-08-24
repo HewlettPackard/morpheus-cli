@@ -1038,6 +1038,10 @@ class Morpheus::APIClient
     Morpheus::TokensInterface.new(common_interface_options).setopts(@options)
   end
 
+  def virtual_switches
+    Morpheus::VirtualSwitchesInterface.new(common_interface_options).setopts(@options)
+  end
+
   def rest(endpoint)
     Morpheus::RestInterface.new(common_interface_options).setopts(@options.merge({base_path: "#{@base_url}/api/#{endpoint}"}))
   end

@@ -166,11 +166,11 @@ module Morpheus::Cli::InfrastructureHelper
 
   # Networks
 
-  def find_network_by_name_or_id(val)
+  def find_network_by_name_or_id(val, include_tenants=false)
     if val.to_s =~ /\A\d{1,}\Z/
       return find_network_by_id(val)
     else
-      return find_network_by_name(val)
+      return find_network_by_name(val, include_tenants)
     end
   end
 
@@ -188,8 +188,10 @@ module Morpheus::Cli::InfrastructureHelper
     end
   end
 
-  def find_network_by_name(name)
-    json_response = networks_interface.list({name: name.to_s})
+  def find_network_by_name(name, include_tenants=false)
+    params = {name: name.to_s}
+    params['includeTenants'] = true if include_tenants
+    json_response = networks_interface.list(params)
     networks = json_response['networks']
     if networks.empty?
       print_red_alert "Network not found by name #{name}"
