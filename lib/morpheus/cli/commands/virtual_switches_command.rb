@@ -9,7 +9,7 @@ class Morpheus::Cli::VirtualSwitchesCommand
 
   set_command_name :'virtual-switches'
   set_command_description "View and manage Virtual Switches"
-
+  set_command_hidden
   register_subcommands :list, :get, :add, :update, :remove
   
   def connect(opts)
