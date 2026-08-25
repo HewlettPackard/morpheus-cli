@@ -556,15 +556,6 @@ class Morpheus::APIClient
     Morpheus::ClustersInterface.new(common_interface_options).setopts(@options)
   end
 
-  def affinity_groups
-    Morpheus::AffinityGroupsInterface.new(common_interface_options).setopts(@options)
-  end
-
-  def host_vm_groups
-    Morpheus::HostVmGroupsInterface.new(common_interface_options).setopts(@options)
-  end
-
-
   def accounts
     Morpheus::AccountsInterface.new(common_interface_options).setopts(@options)
   end

@@ -6,7 +6,6 @@ class Morpheus::Cli::Clouds
   include Morpheus::Cli::InfrastructureHelper
   include Morpheus::Cli::ProvisioningHelper
   include Morpheus::Cli::WhoamiHelper
-  include Morpheus::Cli::AffinityHelper
 
   register_subcommands :list, :count, :get, :add, :update, :remove, :refresh, :security_groups, :apply_security_groups
   register_subcommands :types, :type
@@ -15,7 +14,6 @@ class Morpheus::Cli::Clouds
   register_subcommands :wiki, :update_wiki
   register_subcommands({:'update-logo' => :update_logo,:'update-dark-logo' => :update_dark_logo})
   register_subcommands :list_affinity_groups, :get_affinity_group, :update_affinity_group, :add_affinity_group, :remove_affinity_group
-  register_subcommands :list_host_vm_groups, :get_host_vm_group, :add_host_vm_group, :update_host_vm_group, :remove_host_vm_group
   #register_subcommands :firewall_disable, :firewall_enable
   alias_subcommand :details, :get
   set_default_subcommand :list
@@ -1183,7 +1181,7 @@ EOT
   def list_affinity_groups(args)
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
-      opts.banner = subcommand_usage("[cloud]")
+      opts.banner = subcommand_usage( "[cloud]")
       build_standard_list_options(opts, options)
       opts.footer = "List affinity groups for a cloud.\n" +
           "[cloud] is required. This is the name or id of an existing cloud."
@@ -1192,41 +1190,34 @@ EOT
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:1)
     connect(options)
-
+    
     cloud = find_cloud_by_name_or_id(args[0])
     return 1 if cloud.nil?
     params = {}
     params.merge!(parse_list_options(options))
-    @clouds_interface.setopts(options)
-    if options[:dry_run]
-      print_dry_run @clouds_interface.dry.list_affinity_groups(cloud['id'], params)
-      return
-    end
     json_response = @clouds_interface.list_affinity_groups(cloud['id'], params)
     render_response(json_response, options, 'affinityGroups') do
       affinity_groups = json_response['affinityGroups']
-      print_h1 "Cloud Affinity Groups: \#{cloud['name']}", parse_list_subtitles(options), options
+      print_h1 "Morpheus Cloud Affinity Groups: #{cloud['name']}", parse_list_subtitles(options)
       if affinity_groups.empty?
-        print cyan, "No affinity groups found.", reset, "\n"
-      else
+        print cyan,"No affinity groups found.",reset,"\n"
+      else          
         columns = {
-          "ID"            => 'id',
-          "Name"          => 'name',
-          "Type"          => lambda {|it| format_affinity_type(it['affinityType']) },
-          "VM Group"      => lambda {|it| it['vmGroup']   ? (it['vmGroup']['name']   || it['vmGroup']['id'])   : '' },
-          "Host Group"    => lambda {|it| it['hostGroup'] ? (it['hostGroup']['name'] || it['hostGroup']['id']) : '' },
-          "Resource Pool" => lambda {|it| it['pool']      ? (it['pool']['name']      || it['pool']['id'])      : '' },
-          "Visibility"    => lambda {|it| it['visibility'].to_s.capitalize },
-          "Servers"       => lambda {|it| (it['servers'] || []).size },
+          "ID" => 'id',
+          "Name" => 'name',
+          "Type" => lambda {|it| format_affinity_type(it['affinityType']) },
+          "Resource Pool" => lambda {|it| it['pool'] ? (it['pool']['name'] || it['pool']['id']) : '' },
+          "Visibility" => lambda {|it| it['visibility'].to_s.capitalize },
+          # "Servers" => lambda {|it| it['serverCount'] },
+          # "Source" => lambda {|it| it['source'] },
         }.upcase_keys!
         print as_pretty_table(affinity_groups, columns, options)
         print_results_pagination(json_response)
       end
-      print reset, "\n"
+      print reset,"\n"
     end
     return 0, nil
   end
-
 
   def get_affinity_group(args)
     options = {}
@@ -1287,18 +1278,6 @@ EOT
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage( "[cloud] [name] [options]")
       build_option_type_options(opts, options, add_cloud_affinity_group_option_types)
-      opts.on('--vm-group ID', String, "VM Group id (for VM-to-Host rules)") do |val|
-        options[:options] ||= {}
-        options[:options]['vmGroup'] = {'id' => val.to_i}
-      end
-      opts.on('--host-group ID', String, "Host Group id (for VM-to-Host rules)") do |val|
-        options[:options] ||= {}
-        options[:options]['hostGroup'] = {'id' => val.to_i}
-      end
-      opts.on('--servers ID1,ID2', Array, "Server ids (for VM-to-VM rules)") do |val|
-        options[:options] ||= {}
-        options[:options]['servers'] = val.map {|s| {'id' => s.to_i}}
-      end
       add_perms_options(opts, options, ['plans'])
       build_standard_add_options(opts, options)
       opts.footer = "Add affinity group to a cloud.\n" +
@@ -1329,74 +1308,19 @@ EOT
         option_types = add_cloud_affinity_group_option_types
         affinity_group = Morpheus::Cli::OptionTypes.prompt(option_types, options[:options], @api_client, options[:params])
 
-        preset_servers = options[:options] && options[:options].key?('servers')
-        preset_vmhost  = options[:options] && options[:options].key?('vmGroup') && options[:options].key?('hostGroup')
+        # affinity_group_type = find_affinity_group_type_by_code(affinity_group['affinityGroupType'])
+        # affinity_group['affinityGroupType'] = {id:affinity_group_type['id']}
 
-        form_opts = @clouds_interface.affinity_group_form_options(cloud['id']) rescue {}
-        # Capability gate: AffinityGroupsController#formOptions derives
-        # supportsCombinedRules from zoneType.hasHostVmGroups. Use the flag
-        # itself -- the presence of groups is not the same as support for them.
-        supports_combined = form_opts['supportsCombinedRules'] == true
-
-        # Cluster-in-cloud: the 'pool.id' option type above already prompts for
-        # the cluster. Re-query form-options narrowed by that pool so the group
-        # pickers only offer groups from the cluster the rule will belong to.
-        pool_id = affinity_group['pool'].is_a?(Hash) ? affinity_group['pool']['id'] : nil
-        if pool_id && supports_combined
-          form_opts = (@clouds_interface.affinity_group_form_options(cloud['id'], {'poolId' => pool_id}) rescue form_opts)
-        end
-
-        available_vm_groups   = filter_by_pool(form_opts['availableVmGroups']   || [], pool_id)
-        available_host_groups = filter_by_pool(form_opts['availableHostGroups'] || [], pool_id)
-
-        if !supports_combined && preset_vmhost
-          print yellow, "This cloud does not support VM-to-Host affinity rules.", reset, "\n"
-        end
-
-        unless preset_servers || preset_vmhost
-          if supports_combined && !available_vm_groups.empty? && !available_host_groups.empty?
-            shape = Morpheus::Cli::OptionTypes.prompt([{
-              'fieldName' => 'shape', 'fieldLabel' => 'Rule Shape', 'type' => 'select',
-              'required' => true, 'defaultValue' => 'vmToVm',
-              'selectOptions' => [
-                {'name' => 'VM-to-VM (pick servers)', 'value' => 'vmToVm'},
-                {'name' => 'VM-to-Host (pick groups)', 'value' => 'vmToHost'},
-              ]
-            }], options[:options], @api_client, options[:params])['shape']
-          else
-            shape = 'vmToVm'
-          end
-
-          if shape == 'vmToHost'
-            vm_group_id = Morpheus::Cli::OptionTypes.prompt([{
-              'fieldName' => 'vmGroup', 'fieldLabel' => 'VM Group', 'type' => 'select', 'required' => true,
-              'selectOptions' => available_vm_groups.map {|g| {'name' => g['name'], 'value' => g['id']} }
-            }], options[:options], @api_client, options[:params])['vmGroup']
-            host_group_id = Morpheus::Cli::OptionTypes.prompt([{
-              'fieldName' => 'hostGroup', 'fieldLabel' => 'Host Group', 'type' => 'select', 'required' => true,
-              'selectOptions' => available_host_groups.map {|g| {'name' => g['name'], 'value' => g['id']} }
-            }], options[:options], @api_client, options[:params])['hostGroup']
-            affinity_group['vmGroup']   = {'id' => vm_group_id.to_i}
-            affinity_group['hostGroup'] = {'id' => host_group_id.to_i}
-          else
-            server_prompt = Morpheus::Cli::OptionTypes.prompt([{
-              'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead',
-              'optionSource' => 'searchServers', 'searchParameter' => 'phrase',
-              'description' => 'Select servers to be in the affinity group.'
-            }], options[:options], @api_client, options[:params])
-            affinity_group['servers'] = server_prompt['servers'] if server_prompt['servers']
-          end
-        else
-          affinity_group['servers']   = options[:options]['servers']   if preset_servers
-          affinity_group['vmGroup']   = options[:options]['vmGroup']   if preset_vmhost
-          affinity_group['hostGroup'] = options[:options]['hostGroup'] if preset_vmhost
-        end
+        # # affinity_group type options
+        # unless affinity_group_type['optionTypes'].empty?
+        #   affinity_group.merge!(Morpheus::Cli::OptionTypes.prompt(affinity_group_type['optionTypes'], options[:options].deep_merge({:context_map => {'domain' => ''}, :checkbox_as_boolean => true}), @api_client, options[:params]))
+        # end
 
         # perms
         perms = prompt_permissions(options, is_master_account ? ['plans'] : ['plans', 'visibility', 'tenants'])
 
-        affinity_group['resourcePermissions'] = perms['resourcePermissions'] unless perms['resourcePermissions'].nil?
-        affinity_group['tenants'] = perms['tenantPermissions'] unless perms['tenantPermissions'].nil? || perms['tenantPermissions']['accounts'].empty?
+        affinity_group['resourcePermissions'] = perms['resourcePermissions'] unless perms['resourcePermissions'].empty?
+        affinity_group['tenants'] = perms['tenantPermissions'] unless perms['tenantPermissions'].empty? || perms['tenantPermissions']['accounts'].empty?
         affinity_group['visibility'] = perms['resourcePool']['visibility'] if !perms['resourcePool'].nil? && !perms['resourcePool']['visibility'].nil?
 
         payload = {'affinityGroup' => affinity_group}
@@ -1427,7 +1351,7 @@ EOT
       end
       return 0
     rescue RestClient::Exception => e
-      handle_affinity_rest_exception(e, options)
+      print_rest_exception(e, options)
       exit 1
     end
   end
@@ -1578,295 +1502,6 @@ EOT
     return 0, nil
   end
 
-  def list_host_vm_groups(args)
-    options = {}
-    optparse = Morpheus::Cli::OptionParser.new do |opts|
-      opts.banner = subcommand_usage("[cloud]")
-      build_standard_list_options(opts, options)
-      opts.footer = "List host/VM groups for a cloud.\n" +
-          "[cloud] is required. This is the name or id of an existing cloud."
-    end
-    optparse.parse!(args)
-    verify_args!(args:args, optparse:optparse, count:1)
-    connect(options)
-
-    cloud = find_cloud_by_name_or_id(args[0])
-    return 1 if cloud.nil?
-    params = {}
-    params.merge!(parse_list_options(options))
-    @clouds_interface.setopts(options)
-    if options[:dry_run]
-      print_dry_run @clouds_interface.dry.list_host_vm_groups(cloud['id'], params)
-      return
-    end
-    json_response = @clouds_interface.list_host_vm_groups(cloud['id'], params)
-    render_response(json_response, options, 'hostVmGroups') do
-      rows = json_response['hostVmGroups'] || []
-      print_h1 "Cloud Host/VM Groups: \#{cloud['name']}", parse_list_subtitles(options), options
-      if rows.empty?
-        print cyan, "No host/VM groups found.", reset, "\n"
-      else
-        columns = {
-          "ID"            => 'id',
-          "Name"          => 'name',
-          "Type"          => lambda {|it| format_host_vm_group_type(it['type']) },
-          "Resource Pool" => lambda {|it| it['pool'] ? (it['pool']['name'] || it['pool']['id']) : '' },
-          "Servers"       => lambda {|it| (it['servers'] || []).size },
-        }.upcase_keys!
-        print as_pretty_table(rows, columns, options)
-        print_results_pagination(json_response)
-      end
-      print reset, "\n"
-    end
-    return 0, nil
-  end
-
-  def get_host_vm_group(args)
-    options = {}
-    optparse = Morpheus::Cli::OptionParser.new do |opts|
-      opts.banner = subcommand_usage("[cloud] [host-vm-group]")
-      build_standard_get_options(opts, options)
-      opts.footer = "Get details about a cloud host/VM group.\n" +
-          "[cloud] is required. This is the name or id of an existing cloud.\n" +
-          "[host-vm-group] is required. This is the name or id of an existing host/VM group."
-    end
-    optparse.parse!(args)
-    verify_args!(args:args, optparse:optparse, count:2)
-    connect(options)
-
-    cloud = find_cloud_by_name_or_id(args[0])
-    return 1 if cloud.nil?
-    host_vm_group = find_cloud_host_vm_group_by_name_or_id(cloud['id'], args[1])
-    if host_vm_group.nil?
-      print_red_alert "Host/VM Group not found for '\#{args[1]}'"
-      exit 1
-    end
-
-    params = {}
-    params.merge!(parse_query_options(options))
-    @clouds_interface.setopts(options)
-    if options[:dry_run]
-      print_dry_run @clouds_interface.dry.get_host_vm_group(cloud['id'], host_vm_group['id'], params)
-      return
-    end
-    json_response = @clouds_interface.get_host_vm_group(cloud['id'], host_vm_group['id'], params)
-    render_response(json_response, options, 'hostVmGroup') do
-      row = json_response['hostVmGroup']
-      print_h1 "Host/VM Group Details", [], options
-      columns = {
-        "ID"            => 'id',
-        "Name"          => 'name',
-        "Type"          => lambda {|it| format_host_vm_group_type(it['type']) },
-        "Resource Pool" => lambda {|it| it['pool'] ? (it['pool']['name'] || it['pool']['id']) : '' },
-        "Visibility"    => lambda {|it| it['visibility'].to_s.capitalize },
-        "Servers"       => lambda {|it| (it['servers'] || []).size },
-        "Source"        => 'source',
-      }
-      print_description_list(columns, row)
-      if row['servers'] && row['servers'].size > 0
-        print_h2 "Servers", options
-        print as_pretty_table(row['servers'], [:id, :name], options)
-      end
-      print reset, "\n"
-    end
-    return 0, nil
-  end
-
-  def add_host_vm_group(args)
-    options = {}
-    optparse = Morpheus::Cli::OptionParser.new do |opts|
-      opts.banner = subcommand_usage("[cloud] [name] [options]")
-      build_option_type_options(opts, options, add_cloud_host_vm_group_option_types)
-      opts.on('--servers ID1,ID2', Array, "Server ids to add to the group") do |val|
-        options[:options] ||= {}
-        options[:options]['servers'] = val.map {|s| {'id' => s.to_i}}
-      end
-      add_perms_options(opts, options, ['plans'])
-      build_standard_add_options(opts, options)
-      opts.footer = "Add host/VM group to a cloud.\n" +
-        "[cloud] is required. This is the name or id of an existing cloud.\n" +
-        "[name] is required. This is the name of the new host/VM group."
-    end
-    optparse.parse!(args)
-    verify_args!(args:args, optparse:optparse, min:1, max:2)
-    connect(options)
-
-    begin
-      cloud = find_cloud_by_name_or_id(args[0])
-      return 1 if cloud.nil?
-      if args[1]
-        options[:options] ||= {}
-        options[:options]['name'] = args[1]
-      end
-      if options[:payload]
-        payload = options[:payload]
-        payload.deep_merge!(options[:options].reject {|k,v| k.is_a?(Symbol) }) if options[:options]
-      else
-        options[:params] ||= {}
-        options[:params].merge!({:cloudId => cloud['id'], :zoneId => cloud['id']})
-        host_vm_group = Morpheus::Cli::OptionTypes.prompt(add_cloud_host_vm_group_option_types, options[:options], @api_client, options[:params])
-
-        unless options[:options] && options[:options].key?('servers')
-          # poolId narrows availableServers to the chosen cluster: HOST_GROUP
-          # matches the cluster pool exactly, VM_GROUP walks descendant pools.
-          form_params = {'hostVmGroupType' => host_vm_group['type']}
-          hvg_pool_id = host_vm_group['pool'].is_a?(Hash) ? host_vm_group['pool']['id'] : nil
-          form_params['poolId'] = hvg_pool_id if hvg_pool_id
-          form_opts = @clouds_interface.host_vm_group_form_options(cloud['id'], form_params) rescue {}
-          available = form_opts['availableServers'] || []
-          if available.empty?
-            server_prompt = Morpheus::Cli::OptionTypes.prompt([{
-              'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead',
-              'optionSource' => 'searchServers', 'searchParameter' => 'phrase',
-              'description' => 'Select servers to add to the group.'
-            }], options[:options], @api_client, options[:params])
-            host_vm_group['servers'] = server_prompt['servers'] if server_prompt['servers']
-          else
-            print cyan, "Available Servers:", reset, "\n"
-            available.each {|s| print "  \#{s['id']}\t\#{s['name']}\n" }
-            raw = Morpheus::Cli::OptionTypes.prompt([{
-              'fieldName' => 'servers', 'fieldLabel' => 'Servers (comma-separated IDs)', 'type' => 'text',
-              'description' => 'Server IDs to include, comma-separated'
-            }], options[:options], @api_client, options[:params])['servers']
-            selected_ids = raw.to_s.split(',').map(&:strip).reject(&:empty?).map(&:to_i)
-            host_vm_group['servers'] = selected_ids.map {|id| {'id' => id}}
-          end
-        else
-          host_vm_group['servers'] = options[:options]['servers']
-        end
-
-        perms = prompt_permissions(options, is_master_account ? ['plans'] : ['plans', 'visibility', 'tenants'])
-        host_vm_group['resourcePermissions'] = perms['resourcePermissions'] unless perms['resourcePermissions'].nil?
-        host_vm_group['tenants'] = perms['tenantPermissions'] unless perms['tenantPermissions'].nil? || perms['tenantPermissions']['accounts'].empty?
-        host_vm_group['visibility'] = perms['resourcePool']['visibility'] if !perms['resourcePool'].nil? && !perms['resourcePool']['visibility'].nil?
-
-        payload = {'hostVmGroup' => host_vm_group}
-      end
-
-      @clouds_interface.setopts(options)
-      if options[:dry_run]
-        print_dry_run @clouds_interface.dry.create_host_vm_group(cloud['id'], payload)
-        return
-      end
-      json_response = @clouds_interface.create_host_vm_group(cloud['id'], payload)
-      render_response(json_response, options, 'hostVmGroup') do
-        row = json_response['hostVmGroup']
-        print_green_success "Added host/VM group to cloud \#{cloud['name']}"
-      end
-      return 0, nil
-    rescue RestClient::Exception => e
-      print_rest_exception(e, options)
-      exit 1
-    end
-  end
-
-  def update_host_vm_group(args)
-    options = {}
-    optparse = Morpheus::Cli::OptionParser.new do |opts|
-      opts.banner = subcommand_usage("[cloud] [host-vm-group] [options]")
-      build_option_type_options(opts, options, update_cloud_host_vm_group_option_types)
-      opts.on('--servers ID1,ID2', Array, "Server ids") do |val|
-        options[:options] ||= {}
-        options[:options]['servers'] = val.map {|s| {'id' => s.to_i}}
-      end
-      add_perms_options(opts, options, ['plans'])
-      build_standard_update_options(opts, options)
-      opts.footer = "Update a cloud host/VM group.\n" +
-          "[cloud] is required. This is the name or id of an existing cloud.\n" +
-          "[host-vm-group] is required. This is the name or id of an existing host/VM group."
-    end
-    optparse.parse!(args)
-    verify_args!(args:args, optparse:optparse, count:2)
-    connect(options)
-
-    begin
-      cloud = find_cloud_by_name_or_id(args[0])
-      return 1 if cloud.nil?
-      host_vm_group = find_cloud_host_vm_group_by_name_or_id(cloud['id'], args[1])
-      if host_vm_group.nil?
-        print_red_alert "Host/VM Group not found for '\#{args[1]}'"
-        return 1
-      end
-
-      if options[:payload]
-        payload = options[:payload]
-        payload.deep_merge!(options[:options].reject {|k,v| k.is_a?(Symbol) }) if options[:options]
-      else
-        payload = {'hostVmGroup' => {}}
-        v_prompt = Morpheus::Cli::OptionTypes.no_prompt(update_cloud_host_vm_group_option_types, options[:options], @api_client, {})
-        payload.deep_merge!({'hostVmGroup' => v_prompt})
-
-        perms = prompt_permissions(options, is_master_account ? ['plans'] : ['plans', 'visibility', 'tenants'])
-        payload['hostVmGroup']['permissions'] = perms['resourcePermissions'] if perms['resourcePermissions']
-        payload['hostVmGroup']['visibility'] = perms['resourcePool']['visibility'] if !perms['resourcePool'].nil? && !perms['resourcePool']['visibility'].nil?
-
-        if options[:options]
-          payload.deep_merge!({'hostVmGroup' => options[:options].reject {|k,v| k.is_a?(Symbol) || payload['hostVmGroup'].key?(k) }})
-        end
-        if payload['hostVmGroup'].empty?
-          raise_command_error "Specify at least one option to update.\n\#{optparse}"
-        end
-      end
-
-      @clouds_interface.setopts(options)
-      if options[:dry_run]
-        print_dry_run @clouds_interface.dry.update_host_vm_group(cloud['id'], host_vm_group['id'], payload)
-        return
-      end
-      json_response = @clouds_interface.update_host_vm_group(cloud['id'], host_vm_group['id'], payload)
-      render_response(json_response, options, 'hostVmGroup') do
-        updated = json_response['hostVmGroup'] || host_vm_group
-        print_green_success "Updated host/VM group \#{updated['name']}"
-      end
-      return 0, nil
-    rescue RestClient::Exception => e
-      print_rest_exception(e, options)
-      exit 1
-    end
-  end
-
-  def remove_host_vm_group(args)
-    options = {}
-    optparse = Morpheus::Cli::OptionParser.new do |opts|
-      opts.banner = subcommand_usage("[cloud] [host-vm-group]")
-      build_standard_remove_options(opts, options)
-      opts.footer = "Delete a host/VM group from a cloud.\n" +
-        "[cloud] is required. This is the name or id of an existing cloud.\n" +
-        "[host-vm-group] is required. This is the name or id of an existing host/VM group."
-    end
-    optparse.parse!(args)
-    verify_args!(args:args, optparse:optparse, count:2)
-    connect(options)
-
-    cloud = find_cloud_by_name_or_id(args[0])
-    return 1 if cloud.nil?
-    host_vm_group = find_cloud_host_vm_group_by_name_or_id(cloud['id'], args[1])
-    if host_vm_group.nil?
-      print_red_alert "Host/VM Group not found for '\#{args[1]}'"
-      return 1
-    end
-    unless options[:yes] || ::Morpheus::Cli::OptionTypes.confirm("Are you sure you would like to remove the cloud host/VM group '\#{host_vm_group['name'] || host_vm_group['id']}'?", options)
-      return 9, "aborted command"
-    end
-
-    @clouds_interface.setopts(options)
-    if options[:dry_run]
-      print_dry_run @clouds_interface.dry.destroy_host_vm_group(cloud['id'], host_vm_group['id'])
-      return
-    end
-    begin
-      json_response = @clouds_interface.destroy_host_vm_group(cloud['id'], host_vm_group['id'])
-      render_response(json_response, options) do
-        print_green_success "Removed host/VM group \#{host_vm_group['name']}"
-      end
-      return 0, nil
-    rescue RestClient::Exception => e
-      print_rest_exception(e, options)
-      exit 1
-    end
-  end
-
-
   private
 
   def cloud_list_column_definitions(options)
@@ -1989,49 +1624,22 @@ EOT
   def add_cloud_affinity_group_option_types
     [
       {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text', 'required' => true},
-      affinity_type_option_type(required: true, default: 'KEEP_SEPARATE'),
+      {'fieldName' => 'affinityType', 'fieldLabel' => 'Type', 'type' => 'select', 'selectOptions' => [{'name' => 'Keep Separate', 'value' => 'KEEP_SEPARATE'}, {'name' => 'Keep Together', 'value' => 'KEEP_TOGETHER'}], 'description' => 'Choose affinity type.', 'required' => true, 'defaultValue' => 'KEEP_SEPARATE'},
       {'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox', 'defaultValue' => true},
-      {'fieldName' => 'pool.id', 'fieldLabel' => 'Cluster', 'type' => 'select', 'optionSourceType' => 'vmware',
-       'optionSource' => 'vmwareZonePoolClusters', 'description' => 'Select cluster for the affinity group.', 'required' => true},
-      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers',
-       'searchParameter' => 'phrase', 'description' => 'Select servers to be in the affinity group.'},
+      {'fieldName' => 'pool.id', 'fieldLabel' => 'Cluster', 'type' => 'select', 'optionSourceType' => 'vmware', 'optionSource' => 'vmwareZonePoolClusters', 'description' => 'Select cluster for the affinity group.', 'required' => true},
+      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers', 'searchParameter' => 'phrase', 'description' => 'Select servers to be in the affinity group.'},
     ]
   end
 
   def update_cloud_affinity_group_option_types
     [
-      {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text'},
-      affinity_type_option_type,
       {'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox'},
-      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers',
-       'searchParameter' => 'phrase', 'description' => 'Select servers to be in the affinity group.'},
+      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers', 'searchParameter' => 'phrase', 'description' => 'Select servers to be in the affinity group.'},
     ]
   end
 
-  def find_cloud_host_vm_group_by_name_or_id(cloud_id, val)
-    if val.to_s =~ /\A\d{1,}\Z/
-      @clouds_interface.get_host_vm_group(cloud_id, val)['hostVmGroup'] rescue nil
-    else
-      @clouds_interface.list_host_vm_groups(cloud_id, {name: val})['hostVmGroups'] && @clouds_interface.list_host_vm_groups(cloud_id, {name: val})['hostVmGroups'][0]
-    end
+  def format_affinity_type(affinity_type)
+    affinity_type == "KEEP_SEPARATE" ? "Keep Separate" : "Keep Together"
   end
-
-  def add_cloud_host_vm_group_option_types
-    [
-      {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text', 'required' => true},
-      host_vm_group_type_option_type(required: true, default: 'HOST_GROUP'),
-      # A cloud-scoped host/VM group must belong to a single cluster --
-      # HostVmGroupsController#save rejects servers that span clusters. Same
-      # picker the cloud-scoped affinity group form uses.
-      {'fieldName' => 'pool.id', 'fieldLabel' => 'Cluster', 'type' => 'select', 'optionSourceType' => 'vmware',
-       'optionSource' => 'vmwareZonePoolClusters', 'description' => 'Select cluster for the host/VM group.', 'required' => true},
-    ]
-  end
-
-  def update_cloud_host_vm_group_option_types
-    [
-      {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text'},
-    ]
-  end
-
+    
 end

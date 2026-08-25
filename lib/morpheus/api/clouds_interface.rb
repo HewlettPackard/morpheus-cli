@@ -172,46 +172,4 @@ class Morpheus::CloudsInterface < Morpheus::APIClient
     execute(method: :delete, url: url, headers: headers)
   end
 
-  def affinity_group_form_options(id, params={})
-    url = "#{base_path}/#{id}/affinity-groups/form-options"
-    headers = { params: params, authorization: "******" }
-    execute(method: :get, url: url, headers: headers)
-  end
-
-  def list_host_vm_groups(id, params={})
-    url = "#{base_path}/#{id}/host-vm-groups"
-    headers = { params: params, authorization: "******" }
-    execute(method: :get, url: url, headers: headers)
-  end
-
-  def get_host_vm_group(id, host_vm_group_id, params={})
-    url = "#{base_path}/#{id}/host-vm-groups/#{host_vm_group_id}"
-    headers = { params: params, authorization: "******" }
-    execute(method: :get, url: url, headers: headers)
-  end
-
-  def create_host_vm_group(id, payload)
-    url = "#{base_path}/#{id}/host-vm-groups"
-    headers = { :authorization => "******", 'Content-Type' => 'application/json' }
-    execute(method: :post, url: url, headers: headers, payload: payload.to_json)
-  end
-
-  def update_host_vm_group(id, host_vm_group_id, payload)
-    url = "#{base_path}/#{id}/host-vm-groups/#{host_vm_group_id}"
-    headers = { :authorization => "******", 'Content-Type' => 'application/json' }
-    execute(method: :put, url: url, headers: headers, payload: payload.to_json)
-  end
-
-  def destroy_host_vm_group(id, host_vm_group_id, params={})
-    url = "#{base_path}/#{id}/host-vm-groups/#{host_vm_group_id}"
-    headers = { :params => params, :authorization => "******", 'Content-Type' => 'application/json' }
-    execute(method: :delete, url: url, headers: headers)
-  end
-
-  def host_vm_group_form_options(id, params={})
-    url = "#{base_path}/#{id}/host-vm-groups/form-options"
-    headers = { params: params, authorization: "******" }
-    execute(method: :get, url: url, headers: headers)
-  end
-
 end
