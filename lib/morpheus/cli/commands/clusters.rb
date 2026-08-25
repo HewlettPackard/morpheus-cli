@@ -7,6 +7,7 @@ class Morpheus::Cli::Clusters
   include Morpheus::Cli::WhoamiHelper
   include Morpheus::Cli::AccountsHelper
   include Morpheus::Cli::ExecutionRequestHelper
+  include Morpheus::Cli::AffinityHelper
 
   register_subcommands :list, :count, :get, :view, :add, :update, :remove, :logs, :history, {:'history-details' => :history_details}, {:'history-event' => :history_event_details}
   register_subcommands :list_types, :get_type
@@ -5783,15 +5784,10 @@ class Morpheus::Cli::Clusters
     end
   end
 
-   def add_affinity_group_option_types
+  def add_affinity_group_option_types
     [
       {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text', 'required' => true},
-      {'fieldName' => 'affinityType', 'fieldLabel' => 'Type', 'type' => 'select', 'selectOptions' => [
-        {'name' => 'Keep Together (Should)', 'value' => 'KEEP_TOGETHER'},
-        {'name' => 'Keep Separate (Should)', 'value' => 'KEEP_SEPARATE'},
-        {'name' => 'Keep Together (Must)',   'value' => 'KEEP_TOGETHER_MUST'},
-        {'name' => 'Keep Separate (Must)',   'value' => 'KEEP_SEPARATE_MUST'}
-      ], 'description' => 'Choose affinity type.', 'required' => true, 'defaultValue' => 'KEEP_TOGETHER'},
+      affinity_type_option_type(required: true, default: 'KEEP_TOGETHER'),
       {'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox', 'defaultValue' => true},
     ]
   end
@@ -5799,34 +5795,17 @@ class Morpheus::Cli::Clusters
   def update_affinity_group_option_types
     [
       {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text'},
-      {'fieldName' => 'affinityType', 'fieldLabel' => 'Type', 'type' => 'select', 'selectOptions' => [
-        {'name' => 'Keep Together (Should)', 'value' => 'KEEP_TOGETHER'},
-        {'name' => 'Keep Separate (Should)', 'value' => 'KEEP_SEPARATE'},
-        {'name' => 'Keep Together (Must)',   'value' => 'KEEP_TOGETHER_MUST'},
-        {'name' => 'Keep Separate (Must)',   'value' => 'KEEP_SEPARATE_MUST'}
-      ], 'description' => 'Change affinity type.'},
+      affinity_type_option_type,
       {'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox'},
-      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers', 'searchParameter' => 'phrase', 'description' => 'Select servers to be in the affinity group.'},
+      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers',
+       'searchParameter' => 'phrase', 'description' => 'Select servers to be in the affinity group.'},
     ]
-  end
-
-  def format_affinity_type(affinity_type)
-    case affinity_type.to_s
-    when 'KEEP_SEPARATE'      then 'Keep Separate'
-    when 'KEEP_TOGETHER'      then 'Keep Together'
-    when 'KEEP_SEPARATE_MUST' then 'Keep Separate (Must)'
-    when 'KEEP_TOGETHER_MUST' then 'Keep Together (Must)'
-    else affinity_type.to_s
-    end
   end
 
   def add_host_vm_group_option_types
     [
       {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text', 'required' => true},
-      {'fieldName' => 'type', 'fieldLabel' => 'Group Type', 'type' => 'select', 'selectOptions' => [
-        {'name' => 'Host Group', 'value' => 'HOST_GROUP'},
-        {'name' => 'VM Group',   'value' => 'VM_GROUP'}
-      ], 'required' => true, 'defaultValue' => 'HOST_GROUP', 'description' => 'Choose group type.'},
+      host_vm_group_type_option_type(required: true, default: 'HOST_GROUP'),
     ]
   end
 
@@ -5834,14 +5813,6 @@ class Morpheus::Cli::Clusters
     [
       {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text'},
     ]
-  end
-
-  def format_host_vm_group_type(type)
-    case type.to_s
-    when 'HOST_GROUP' then 'Host Group'
-    when 'VM_GROUP'   then 'VM Group'
-    else type.to_s
-    end
   end
 
   def find_cluster_host_vm_group_by_name_or_id(cluster_id, val)
