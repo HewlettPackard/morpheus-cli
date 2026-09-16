@@ -16,6 +16,7 @@ class Morpheus::Cli::HostVmGroupsCommand
     @host_vm_groups_interface = @api_client.host_vm_groups
     @clouds_interface = @api_client.clouds
     @clusters_interface = @api_client.clusters
+    @cloud_resource_pools_interface = @api_client.cloud_resource_pools
   end
 
   def handle(args)
@@ -41,7 +42,31 @@ class Morpheus::Cli::HostVmGroupsCommand
     verify_args!(args:args, optparse:optparse, count:0)
     connect(options)
 
-    if options[:cloud]
+    if options[:cloud] && options[:cluster]
+      cloud = find_cloud_by_name_or_id(options[:cloud])
+      return 1 if cloud.nil?
+      pool = find_resource_pool_cluster_by_name_or_id(cloud, options[:cluster])
+      return 1 if pool.nil?
+      params.merge!(parse_list_options(options))
+      params['poolId'] = pool['id']
+      @clouds_interface.setopts(options)
+      if options[:dry_run]
+        print_dry_run @clouds_interface.dry.list_host_vm_groups(cloud['id'], params)
+        return
+      end
+      json_response = @clouds_interface.list_host_vm_groups(cloud['id'], params)
+      render_response(json_response, options, 'hostVmGroups') do
+        rows = json_response['hostVmGroups']
+        print_h1 "Host/VM Groups: #{cloud['name']} / #{pool['name']}", parse_list_subtitles(options), options
+        if rows.empty?
+          print cyan, "No host/VM groups found.", reset, "\n"
+        else
+          print as_pretty_table(rows, host_vm_group_list_columns, options)
+          print_results_pagination(json_response)
+        end
+        print reset, "\n"
+      end
+    elsif options[:cloud]
       cloud = find_cloud_by_name_or_id(options[:cloud])
       return 1 if cloud.nil?
       params.merge!(parse_list_options(options))
@@ -63,18 +88,33 @@ class Morpheus::Cli::HostVmGroupsCommand
         print reset, "\n"
       end
     elsif options[:cluster]
-      cluster = find_cluster_by_name_or_id(options[:cluster])
-      return 1 if cluster.nil?
+      cluster_scope = find_cluster_list_scope_by_name_or_id(options[:cluster])
+      return 1 if cluster_scope.nil?
       params.merge!(parse_list_options(options))
-      @clusters_interface.setopts(options)
-      if options[:dry_run]
-        print_dry_run @clusters_interface.dry.list_host_vm_groups(cluster['id'], params)
-        return
+      if cluster_scope[:type] == :managed_cluster
+        cluster = cluster_scope[:cluster]
+        @clusters_interface.setopts(options)
+        if options[:dry_run]
+          print_dry_run @clusters_interface.dry.list_host_vm_groups(cluster['id'], params)
+          return
+        end
+        json_response = @clusters_interface.list_host_vm_groups(cluster['id'], params)
+        scope_name = cluster['name']
+      else
+        cloud = cluster_scope[:cloud]
+        pool = cluster_scope[:pool]
+        params['poolId'] = pool['id']
+        @clouds_interface.setopts(options)
+        if options[:dry_run]
+          print_dry_run @clouds_interface.dry.list_host_vm_groups(cloud['id'], params)
+          return
+        end
+        json_response = @clouds_interface.list_host_vm_groups(cloud['id'], params)
+        scope_name = "#{cloud['name']} / #{pool['name']}"
       end
-      json_response = @clusters_interface.list_host_vm_groups(cluster['id'], params)
       render_response(json_response, options, 'hostVmGroups') do
         rows = json_response['hostVmGroups']
-        print_h1 "Host/VM Groups: #{cluster['name']}", parse_list_subtitles(options), options
+        print_h1 "Host/VM Groups: #{scope_name}", parse_list_subtitles(options), options
         if rows.empty?
           print cyan, "No host/VM groups found.", reset, "\n"
         else
@@ -182,7 +222,23 @@ class Morpheus::Cli::HostVmGroupsCommand
       # /api/zones/{id}/host-vm-groups. There is no top-level create route.
       scope_cloud   = options[:options] && options[:options]['cloudId']
       scope_cluster = options[:options] && options[:options]['clusterId']
-      if scope_cloud
+      if scope_cloud && scope_cluster
+        cloud = find_cloud_by_name_or_id(scope_cloud)
+        return 1 if cloud.nil?
+        pool = find_resource_pool_cluster_by_name_or_id(cloud, scope_cluster)
+        return 1 if pool.nil?
+        if payload['hostVmGroup'].is_a?(Hash)
+          payload['hostVmGroup'].delete('cloudId')
+          payload['hostVmGroup'].delete('clusterId')
+          payload['hostVmGroup']['pool'] = {'id' => pool['id']}
+        end
+        @clouds_interface.setopts(options)
+        if options[:dry_run]
+          print_dry_run @clouds_interface.dry.create_host_vm_group(cloud['id'], payload)
+          return
+        end
+        json_response = @clouds_interface.create_host_vm_group(cloud['id'], payload)
+      elsif scope_cloud
         cloud = find_cloud_by_name_or_id(scope_cloud)
         return 1 if cloud.nil?
         payload['hostVmGroup'].delete('cloudId') if payload['hostVmGroup'].is_a?(Hash)
@@ -193,15 +249,31 @@ class Morpheus::Cli::HostVmGroupsCommand
         end
         json_response = @clouds_interface.create_host_vm_group(cloud['id'], payload)
       elsif scope_cluster
-        cluster = find_cluster_by_name_or_id(scope_cluster)
-        return 1 if cluster.nil?
-        payload['hostVmGroup'].delete('clusterId') if payload['hostVmGroup'].is_a?(Hash)
-        @clusters_interface.setopts(options)
-        if options[:dry_run]
-          print_dry_run @clusters_interface.dry.create_host_vm_group(cluster['id'], payload)
-          return
+        cluster_scope = find_cluster_list_scope_by_name_or_id(scope_cluster)
+        return 1 if cluster_scope.nil?
+        if cluster_scope[:type] == :managed_cluster
+          cluster = cluster_scope[:cluster]
+          payload['hostVmGroup'].delete('clusterId') if payload['hostVmGroup'].is_a?(Hash)
+          @clusters_interface.setopts(options)
+          if options[:dry_run]
+            print_dry_run @clusters_interface.dry.create_host_vm_group(cluster['id'], payload)
+            return
+          end
+          json_response = @clusters_interface.create_host_vm_group(cluster['id'], payload)
+        else
+          cloud = cluster_scope[:cloud]
+          pool = cluster_scope[:pool]
+          if payload['hostVmGroup'].is_a?(Hash)
+            payload['hostVmGroup'].delete('clusterId')
+            payload['hostVmGroup']['pool'] = {'id' => pool['id']}
+          end
+          @clouds_interface.setopts(options)
+          if options[:dry_run]
+            print_dry_run @clouds_interface.dry.create_host_vm_group(cloud['id'], payload)
+            return
+          end
+          json_response = @clouds_interface.create_host_vm_group(cloud['id'], payload)
         end
-        json_response = @clusters_interface.create_host_vm_group(cluster['id'], payload)
       else
         print_error Morpheus::Terminal.angry_prompt
         puts_error "#{command_name} add requires a scope: pass --cloud CLOUD or --cluster CLUSTER\n#{optparse}"
@@ -346,15 +418,6 @@ class Morpheus::Cli::HostVmGroupsCommand
     [
       {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text'},
     ]
-  end
-
-  def find_cluster_by_name_or_id(val)
-    if val.to_s =~ /\A\d{1,}\Z/
-      @clusters_interface.get(val.to_i)['cluster'] rescue nil
-    else
-      results = @clusters_interface.list({name: val})
-      results['clusters'] && results['clusters'][0]
-    end
   end
 
 end
