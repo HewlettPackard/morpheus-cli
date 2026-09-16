@@ -74,8 +74,11 @@ class Morpheus::Cli::Clusters
       opts.on('--all-labels LABEL', String, "Filter by labels, must match all of the values") do |val|
         add_query_parameter(params, 'allLabels', parse_labels(val))
       end
+      opts.on('--uuid UUID', String, "Filter by uuid, can be passed multiple times to match any of the values") do |val|
+        add_query_parameter(params, 'uuid', val)
+      end
       build_common_options(opts, options, [:list, :query, :json, :yaml, :csv, :fields, :dry_run, :remote])
-      opts.footer = "List clusters."
+      opts.footer = "List clusters.\nFilter by one or more uuids using --uuid UUID."
     end
     optparse.parse!(args)
     if args.count != 0
@@ -149,7 +152,7 @@ class Morpheus::Cli::Clusters
   def get(args)
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
-      opts.banner = subcommand_usage("[id]")
+      opts.banner = subcommand_usage("[cluster]")
       opts.on( nil, '--hosts', "Display masters and workers" ) do
         options[:show_masters] = true
         options[:show_workers] = true
@@ -173,7 +176,7 @@ class Morpheus::Cli::Clusters
         options[:refresh_until_status] = val.to_s.downcase
       end
       build_common_options(opts, options, [:json, :dry_run, :remote])
-      opts.footer = "Get details about a cluster."
+      opts.footer = "Get details about a cluster.\n[cluster] is required. This is the id, name, or uuid of a cluster."
     end
     optparse.parse!(args)
     if args.count < 1
@@ -194,6 +197,8 @@ class Morpheus::Cli::Clusters
       if options[:dry_run]
         if arg.to_s =~ /\A\d{1,}\Z/
           print_dry_run @clusters_interface.dry.get(arg.to_i)
+        elsif cluster_uuid?(arg)
+          print_dry_run @clusters_interface.dry.get(arg.to_s)
         else
           print_dry_run @clusters_interface.dry.list({name:arg})
         end
@@ -5030,9 +5035,15 @@ class Morpheus::Cli::Clusters
   def find_cluster_by_name_or_id(val)
     if val.to_s =~ /\A\d{1,}\Z/
       find_cluster_by_id(val)
+    elsif cluster_uuid?(val)
+      find_cluster_by_uuid(val)
     else
       find_cluster_by_name(val)
     end
+  end
+
+  def cluster_uuid?(val)
+    !!(val.to_s =~ /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i)
   end
 
   def find_cluster_by_id(id)
@@ -5042,6 +5053,22 @@ class Morpheus::Cli::Clusters
       exit 1
     end
     json_results['cluster']
+  end
+
+  def find_cluster_by_uuid(uuid)
+    json_results = @clusters_interface.get(uuid.to_s)
+    if json_results['cluster'].nil? || json_results['cluster'].empty?
+      print_red_alert "Cluster not found by uuid #{uuid}"
+      exit 1
+    end
+    json_results['cluster']
+  rescue RestClient::Exception => e
+    if e.response && e.response.code == 404
+      print_red_alert "Cluster not found by uuid #{uuid}"
+      exit 1
+    else
+      raise e
+    end
   end
 
   def find_cluster_by_name(name)
