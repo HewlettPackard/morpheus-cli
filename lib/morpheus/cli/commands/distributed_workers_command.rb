@@ -5,10 +5,6 @@ class Morpheus::Cli::DistributedWorkers
 
   register_subcommands :list, :get, :add, :update, :remove
 
-  def initialize()
-    # @appliance_name, @appliance_url = Morpheus::Cli::Remote.active_appliance
-  end
-
   def connect(opts)
     @api_client = establish_remote_appliance_connection(opts)
     @distributed_workers_interface = @api_client.distributed_workers
@@ -20,29 +16,24 @@ class Morpheus::Cli::DistributedWorkers
 
   def list(args)
     options = {}
-    params = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage()
-      build_common_options(opts, options, [:list, :query, :json, :yaml, :csv, :fields, :dry_run, :remote])
+      build_standard_list_options(opts, options)
       opts.footer = "List distributed workers."
     end
     optparse.parse!(args)
     connect(options)
-    begin
-      params.merge!(parse_list_options(options))
-      @distributed_workers_interface.setopts(options)
-      if options[:dry_run]
-        print_dry_run @distributed_workers_interface.dry.list(params)
-        return 0
-      end
-      json_response = @distributed_workers_interface.list(params)
-      render_result = render_with_format(json_response, options, 'distributedWorkers')
-      return 0 if render_result
+    verify_args!(args:args, optparse:optparse, count:0)
+    params = parse_list_options(options)
+    @distributed_workers_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @distributed_workers_interface.dry.list(params)
+      return
+    end
+    json_response = @distributed_workers_interface.list(params)
+    render_response(json_response, options, 'distributedWorkers') do
       distributed_workers = json_response['distributedWorkers']
-      title = "Morpheus Distributed Workers"
-      subtitles = []
-      subtitles += parse_list_subtitles(options)
-      print_h1 title, subtitles
+      print_h1 "Morpheus Distributed Workers", parse_list_subtitles(options), options
       if distributed_workers.empty?
         print cyan,"No distributed workers found.",reset,"\n"
       else
@@ -57,70 +48,44 @@ class Morpheus::Cli::DistributedWorkers
           }
         end
         columns = [:id, :name, :enabled, {:proxyPort => {:display_name => "Proxy Port"} }, {:proxyHostList => {:display_name => "Proxy Host List"} }, {:applianceUrl => {:display_name => "Appliance URL"} }]
-        columns = options[:include_fields] if options[:include_fields]
-        print cyan
         print as_pretty_table(rows, columns, options)
-        print reset
         print_results_pagination(json_response)
       end
       print reset,"\n"
-      return 0
-    rescue RestClient::Exception => e
-      print_rest_exception(e, options)
-      exit 1
     end
+    return 0, nil
   end
 
   def get(args)
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[distributed-worker]")
-      build_common_options(opts, options, [:query, :json, :yaml, :csv, :fields, :dry_run, :remote])
+      build_standard_get_options(opts, options)
       opts.footer = "Get details about a distributed worker.\n[distributed-worker] is required. This is the name or id of a distributed worker."
     end
     optparse.parse!(args)
-    if args.count < 1
-      print_error Morpheus::Terminal.angry_prompt
-      puts_error  "#{command_name} missing argument: [distributed-worker]\n#{optparse}"
-      return 1
-    end
+    verify_args!(args:args, optparse:optparse, count:1)
     connect(options)
-    begin
-      @distributed_workers_interface.setopts(options)
-      if options[:dry_run]
-        if args[0].to_s =~ /\A\d{1,}\Z/
-          print_dry_run @distributed_workers_interface.dry.get(args[0].to_i)
-        else
-          print_dry_run @distributed_workers_interface.dry.list({name: args[0]})
-        end
-        return 0
+    _get(args[0], options)
+  end
+
+  def _get(id, options)
+    @distributed_workers_interface.setopts(options)
+    if options[:dry_run]
+      if id.to_s =~ /\A\d{1,}\Z/
+        print_dry_run @distributed_workers_interface.dry.get(id.to_i)
+      else
+        print_dry_run @distributed_workers_interface.dry.list({name: id})
       end
-      distributed_worker = find_distributed_worker_by_name_or_id(args[0])
-      return 1 if distributed_worker.nil?
-      json_response = {'distributedWorker' => distributed_worker}
-      render_result = render_with_format(json_response, options, 'distributedWorker')
-      return 0 if render_result
-      print_h1 "Distributed Worker Details"
-      print cyan
-      description_cols = {
-        "ID" => 'id',
-        "Name" => 'name',
-        "Description" => 'description',
-        "Enabled" => lambda {|it| format_boolean(it['enabled']) },
-        "Active" => lambda {|it| format_boolean(it['active']) },
-        "Proxy Port" => 'proxyPort',
-        "Proxy Host List" => 'proxyHostList',
-        "Appliance URL" => 'applianceUrl',
-        "Created" => lambda {|it| format_local_dt(it['dateCreated']) },
-        "Updated" => lambda {|it| format_local_dt(it['lastUpdated']) }
-      }
-      print_description_list(description_cols, distributed_worker)
-      print reset,"\n"
-      return 0
-    rescue RestClient::Exception => e
-      print_rest_exception(e, options)
-      exit 1
+      return
     end
+    distributed_worker = find_distributed_worker_by_name_or_id(id)
+    return 1 if distributed_worker.nil?
+    json_response = {'distributedWorker' => distributed_worker}
+    render_response(json_response, options, 'distributedWorker') do
+      render_distributed_worker_details(distributed_worker)
+    end
+    return 0, nil
   end
 
   def add(args)
@@ -128,7 +93,7 @@ class Morpheus::Cli::DistributedWorkers
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[name] [options]")
       build_option_type_options(opts, options, add_distributed_worker_option_types)
-      build_common_options(opts, options, [:options, :json, :dry_run, :quiet, :remote])
+      build_standard_add_options(opts, options)
       opts.footer = <<-EOT
 Add a distributed worker.
 [name] is required. This is the name of the new distributed worker.
@@ -136,42 +101,36 @@ The generated apiKey is only shown once, on creation. Be sure to save it.
       EOT
     end
     optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, max:1)
     connect(options)
-    begin
-      options[:options] ||= {}
-      if args[0]
-        options[:options]['name'] ||= args[0]
-      end
+    options[:options] ||= {}
+    if args[0]
+      options[:options]['name'] ||= args[0]
+    end
+    payload = parse_payload(options, 'distributedWorker')
+    if payload.nil?
       params = Morpheus::Cli::OptionTypes.prompt(add_distributed_worker_option_types, options[:options], @api_client, options[:params])
       payload = {'distributedWorker' => params}
-      @distributed_workers_interface.setopts(options)
-      if options[:dry_run]
-        print_dry_run @distributed_workers_interface.dry.create(payload)
-        return 0
-      end
-      json_response = @distributed_workers_interface.create(payload)
-      if options[:json]
-        print JSON.pretty_generate(json_response)
-        print "\n"
-        return 0
-      end
-      distributed_worker = json_response['distributedWorker']
-      unless options[:quiet]
-        print_green_success "Added distributed worker #{distributed_worker['name']}"
-        api_key = distributed_worker['apiKey']
-        if api_key
-          print "\n"
-          print_h2 "API Key"
-          print yellow, "Save this API Key now. It will not be shown again.", reset, "\n"
-          print cyan, api_key, reset, "\n"
-        end
-        get([distributed_worker['id']])
-      end
-      return 0
-    rescue RestClient::Exception => e
-      print_rest_exception(e, options)
-      exit 1
     end
+    @distributed_workers_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @distributed_workers_interface.dry.create(payload)
+      return
+    end
+    json_response = @distributed_workers_interface.create(payload)
+    render_response(json_response, options, 'distributedWorker') do
+      distributed_worker = json_response['distributedWorker']
+      print_green_success "Added distributed worker #{distributed_worker['name']}"
+      api_key = distributed_worker['apiKey']
+      if api_key
+        print "\n"
+        print_h2 "API Key"
+        print yellow, "Save this API Key now. It will not be shown again.", reset, "\n"
+        print cyan, api_key, reset, "\n"
+      end
+      render_distributed_worker_details(distributed_worker)
+    end
+    return 0, nil
   end
 
   def update(args)
@@ -179,93 +138,90 @@ The generated apiKey is only shown once, on creation. Be sure to save it.
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[distributed-worker] [options]")
       build_option_type_options(opts, options, update_distributed_worker_option_types)
-      build_common_options(opts, options, [:options, :json, :dry_run, :remote])
+      build_standard_update_options(opts, options)
       opts.footer = <<-EOT
 Update a distributed worker.
 [distributed-worker] is required. This is the name or id of a distributed worker.
       EOT
     end
     optparse.parse!(args)
-    if args.count < 1
-      print_error Morpheus::Terminal.angry_prompt
-      puts_error  "#{command_name} missing argument: [distributed-worker]\n#{optparse}"
-      return 1
-    end
+    verify_args!(args:args, optparse:optparse, count:1)
     connect(options)
-    begin
-      distributed_worker = find_distributed_worker_by_name_or_id(args[0])
-      return 1 if distributed_worker.nil?
+    distributed_worker = find_distributed_worker_by_name_or_id(args[0])
+    return 1 if distributed_worker.nil?
+    payload = parse_payload(options, 'distributedWorker')
+    if payload.nil?
       params = options[:options] || {}
       params = params.select {|k,v| params[k].to_s != "" }
       if params.empty?
-        print_red_alert "Specify at least one option to update"
-        puts optparse
-        return 1
+        raise_command_error "Specify at least one option to update.\n#{optparse}"
       end
-      payload = {'distributedWorker' => {id: distributed_worker['id']}.merge(params)}
-      @distributed_workers_interface.setopts(options)
-      if options[:dry_run]
-        print_dry_run @distributed_workers_interface.dry.update(distributed_worker['id'], payload)
-        return 0
-      end
-      json_response = @distributed_workers_interface.update(distributed_worker['id'], payload)
-      if options[:json]
-        print JSON.pretty_generate(json_response)
-        print "\n"
-        return 0
-      end
-      print_green_success "Updated distributed worker #{distributed_worker['name']}"
-      get([distributed_worker['id']])
-      return 0
-    rescue RestClient::Exception => e
-      print_rest_exception(e, options)
-      exit 1
+      payload = {'distributedWorker' => params}
     end
+    payload['distributedWorker']['id'] = distributed_worker['id']
+    @distributed_workers_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @distributed_workers_interface.dry.update(distributed_worker['id'], payload)
+      return
+    end
+    json_response = @distributed_workers_interface.update(distributed_worker['id'], payload)
+    render_response(json_response, options, 'distributedWorker') do
+      print_green_success "Updated distributed worker #{distributed_worker['name']}"
+      _get(distributed_worker['id'], options)
+    end
+    return 0, nil
   end
 
   def remove(args)
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
       opts.banner = subcommand_usage("[distributed-worker]")
-      build_common_options(opts, options, [:auto_confirm, :json, :dry_run, :remote])
+      build_standard_remove_options(opts, options)
       opts.footer = <<-EOT
 Delete a distributed worker.
 [distributed-worker] is required. This is the name or id of a distributed worker.
       EOT
     end
     optparse.parse!(args)
-    if args.count < 1
-      print_error Morpheus::Terminal.angry_prompt
-      puts_error  "#{command_name} missing argument: [distributed-worker]\n#{optparse}"
-      return 1
-    end
+    verify_args!(args:args, optparse:optparse, count:1)
     connect(options)
-    begin
-      distributed_worker = find_distributed_worker_by_name_or_id(args[0])
-      return 1 if distributed_worker.nil?
-      unless options[:yes] || Morpheus::Cli::OptionTypes.confirm("Are you sure you want to delete the distributed worker #{distributed_worker['name']}?")
-        return 9, "aborted command"
-      end
-      @distributed_workers_interface.setopts(options)
-      if options[:dry_run]
-        print_dry_run @distributed_workers_interface.dry.destroy(distributed_worker['id'])
-        return 0
-      end
-      json_response = @distributed_workers_interface.destroy(distributed_worker['id'])
-      if options[:json]
-        print JSON.pretty_generate(json_response)
-        print "\n"
-        return 0
-      end
-      print_green_success "Removed distributed worker #{distributed_worker['name']}"
-      return 0
-    rescue RestClient::Exception => e
-      print_rest_exception(e, options)
-      exit 1
+    distributed_worker = find_distributed_worker_by_name_or_id(args[0])
+    return 1 if distributed_worker.nil?
+    unless options[:yes] || Morpheus::Cli::OptionTypes.confirm("Are you sure you want to delete the distributed worker #{distributed_worker['name']}?", options)
+      return 9, "aborted command"
     end
+    @distributed_workers_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @distributed_workers_interface.dry.destroy(distributed_worker['id'])
+      return
+    end
+    json_response = @distributed_workers_interface.destroy(distributed_worker['id'])
+    render_response(json_response, options, 'distributedWorker') do
+      print_green_success "Removed distributed worker #{distributed_worker['name']}"
+    end
+    return 0, nil
   end
 
   private
+
+  def render_distributed_worker_details(distributed_worker)
+    print_h1 "Distributed Worker Details"
+    print cyan
+    description_cols = {
+      "ID" => 'id',
+      "Name" => 'name',
+      "Description" => 'description',
+      "Enabled" => lambda {|it| format_boolean(it['enabled']) },
+      "Active" => lambda {|it| format_boolean(it['active']) },
+      "Proxy Port" => 'proxyPort',
+      "Proxy Host List" => 'proxyHostList',
+      "Appliance URL" => 'applianceUrl',
+      "Created" => lambda {|it| format_local_dt(it['dateCreated']) },
+      "Updated" => lambda {|it| format_local_dt(it['lastUpdated']) }
+    }
+    print_description_list(description_cols, distributed_worker)
+    print reset,"\n"
+  end
 
   def find_distributed_worker_by_name_or_id(val)
     if val.to_s =~ /\A\d{1,}\Z/

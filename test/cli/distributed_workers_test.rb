@@ -13,7 +13,7 @@ class MorpheusTest::DistributedWorkersTest < MorpheusTest::TestCase
     begin
       # add and capture output to assert the apiKey is surfaced once
       add_output = capture_stdout do
-        assert_execute %(distributed-workers add "#{worker_name}" --description "cli test worker" --enabled)
+        assert_execute %(distributed-workers add "#{worker_name}" --description "cli test worker" --enabled -N)
       end
       created_id = client.distributed_workers.list({name: worker_name})['distributedWorkers'].first['id']
       assert_not_nil created_id, "Expected distributed worker to be created"
