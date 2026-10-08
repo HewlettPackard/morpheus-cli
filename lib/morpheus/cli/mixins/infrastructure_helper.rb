@@ -21,6 +21,11 @@ module Morpheus::Cli::InfrastructureHelper
     @clouds_interface
   end
 
+  def clusters_interface
+    raise "#{self.class} has not defined @clusters_interface" if @clusters_interface.nil?
+    @clusters_interface
+  end
+
   def networks_interface
     # @api_client.networks
     raise "#{self.class} has not defined @networks_interface" if @networks_interface.nil?
@@ -412,6 +417,138 @@ module Morpheus::Cli::InfrastructureHelper
     else
       return resource_pools[0]
     end
+  end
+
+  # Resolve a cloud-owned vSphere cluster: a ComputeZonePool with type='Cluster'
+  # that belongs to the given cloud. This is distinct from a Morpheus managed
+  # cluster (ComputeServerGroup, resolved via ClustersInterface / /api/clusters).
+  #
+  # MORPH-17279: --cloud CLOUD --cluster CLUSTER must resolve CLUSTER within
+  # CLOUD's own resource pools, not the top-level managed-cluster namespace.
+  # `cloud` is the already-resolved cloud Hash (from find_cloud_by_name_or_id).
+  def find_resource_pool_cluster_by_name_or_id(cloud, val)
+    if val.to_s =~ /\A\d{1,}\Z/
+      return find_resource_pool_cluster_by_id(cloud, val)
+    else
+      return find_resource_pool_cluster_by_name(cloud, val)
+    end
+  end
+
+  def find_resource_pool_cluster_by_id(cloud, id)
+    begin
+      # Scoped to the cloud so the server itself verifies pool ownership --
+      # ZoneResourcePoolsController#show 404s when the pool's zone does not
+      # match the requested cloud.
+      json_response = resource_pools_interface.get(cloud['id'], id.to_i)
+    rescue RestClient::Exception => e
+      if e.response && e.response.code == 404
+        print_red_alert "Cluster not found by id #{id} in cloud '#{cloud['name']}'"
+        return nil
+      else
+        raise e
+      end
+    end
+    resource_pool = json_response['resourcePool']
+    if resource_pool.nil?
+      print_red_alert "Cluster not found by id #{id} in cloud '#{cloud['name']}'"
+      return nil
+    end
+    if resource_pool['type'].to_s != 'Cluster'
+      print_red_alert "Resource pool #{id} in cloud '#{cloud['name']}' is a '#{resource_pool['type'] || 'unknown'}' resource pool, not a Cluster"
+      return nil
+    end
+    return resource_pool
+  end
+
+  def find_resource_pool_cluster_by_name(cloud, name)
+    json_response = resource_pools_interface.list(cloud['id'], {name: name.to_s, type: 'Cluster'})
+    # The cloud-scoped resource-pools endpoint returns a pool *tree*, backfilling
+    # ancestor folder pools so the hierarchy renders correctly. Ancestors do not
+    # satisfy our name/type filter, so re-filter here rather than trusting the
+    # raw result size for ambiguity detection.
+    resource_pools = (json_response['resourcePools'] || []).select do |it|
+      it['type'].to_s == 'Cluster' && (it['name'].to_s == name.to_s || it['displayName'].to_s == name.to_s)
+    end
+    if resource_pools.empty?
+      print_red_alert "Cluster not found by name '#{name}' in cloud '#{cloud['name']}'.\n" \
+        "To look up a Morpheus managed cluster instead, use --cluster '#{name}' without --cloud."
+      return nil
+    elsif resource_pools.size > 1
+      print_red_alert "#{resource_pools.size} clusters found by name '#{name}' in cloud '#{cloud['name']}'. Use a numeric cluster id instead."
+      rows = resource_pools.collect do |it|
+        {id: it['id'], name: it['name']}
+      end
+      puts as_pretty_table(rows, [:id, :name], {color:red})
+      return nil
+    else
+      return resource_pools[0]
+    end
+  end
+
+  def find_managed_cluster_by_name_or_id(val, report_not_found=true)
+    cluster = nil
+    if val.to_s =~ /\A\d{1,}\Z/
+      begin
+        cluster = clusters_interface.get(val.to_i)['cluster']
+      rescue RestClient::Exception => e
+        raise e unless e.response && e.response.code == 404
+      end
+    else
+      clusters = clusters_interface.list({name: val})['clusters'] || []
+      if clusters.size > 1
+        print_red_alert "#{clusters.size} managed clusters found by name '#{val}'. Use a numeric cluster id instead."
+        rows = clusters.collect {|it| {id: it['id'], name: it['name']} }
+        puts as_pretty_table(rows, [:id, :name], {color:red})
+        return nil
+      end
+      cluster = clusters[0]
+    end
+    if cluster.nil? && report_not_found
+      print_red_alert "Managed cluster not found by name or id '#{val}'.\n" \
+        "If '#{val}' is a vSphere cluster owned by a cloud, use --cloud CLOUD --cluster #{val} instead."
+    end
+    cluster
+  end
+
+  def find_cluster_list_scope_by_name_or_id(val)
+    if val.to_s =~ /\A\d{1,}\Z/
+      cluster = find_managed_cluster_by_name_or_id(val)
+      return cluster ? {type: :managed_cluster, cluster: cluster} : nil
+    end
+
+    managed_clusters = clusters_interface.list({name: val})['clusters'] || []
+    if managed_clusters.size > 1
+      print_red_alert "#{managed_clusters.size} managed clusters found by name '#{val}'. Use a numeric cluster id instead."
+      rows = managed_clusters.collect {|it| {id: it['id'], name: it['name']} }
+      puts as_pretty_table(rows, [:id, :name], {color:red})
+      return nil
+    elsif managed_clusters.size == 1
+      return {type: :managed_cluster, cluster: managed_clusters[0]}
+    end
+
+    json_response = resource_pools_interface.list_without_cloud({name: val.to_s, type: 'Cluster', max: 1000})
+    resource_pools = (json_response['resourcePools'] || []).select do |it|
+      it['type'].to_s == 'Cluster' && (it['name'].to_s == val.to_s || it['displayName'].to_s == val.to_s)
+    end
+    if resource_pools.empty?
+      print_red_alert "No managed or vSphere cluster found by name '#{val}'."
+      return nil
+    elsif resource_pools.size > 1
+      print_red_alert "#{resource_pools.size} vSphere clusters found by name '#{val}'. Use --cloud CLOUD --cluster #{val} to disambiguate."
+      rows = resource_pools.collect do |it|
+        {id: it['id'], name: it['name'], cloud: it['zone'] && it['zone']['name']}
+      end
+      puts as_pretty_table(rows, [:id, :name, :cloud], {color:red})
+      return nil
+    end
+
+    resource_pool = resource_pools[0]
+    cloud = resource_pool['zone']
+    if cloud.nil? || cloud['id'].nil?
+      print_red_alert "vSphere cluster '#{val}' does not include its owning cloud."
+      return nil
+    end
+    {type: :cloud_pool, cloud: cloud, pool: resource_pool}
   end
 
   def find_resource_pool_group_by_name_or_id(val)

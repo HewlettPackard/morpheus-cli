@@ -1501,13 +1501,48 @@ module Morpheus
       end
 
       def self.sort_option_types(option_types)
-        if option_types.find {|it| it['fieldGroup'] || it['displayOrder'] }
+        sorted = if option_types.find {|it| it['fieldGroup'] || it['displayOrder'] }
           option_types.select {|it| (it['fieldGroup'] || 'default').casecmp?('default')}.sort {|a,b| a['displayOrder'].to_i <=> b['displayOrder'].to_i} +
           option_types.reject {|it| ['default', 'advanced'].include?((it['fieldGroup'] || 'default').downcase)}.sort{|a,b| a['displayOrder'] <=> b['displayOrder']}.group_by{|it| it['fieldGroup']}.values.collect { |it| it.sort{|a,b| a['displayOrder'].to_i <=> b['displayOrder'].to_i}}.flatten +
           option_types.select {|it| 'advanced'.casecmp?(it['fieldGroup'])}.sort {|a,b| a['displayOrder'].to_i <=> b['displayOrder'].to_i}
         else
           option_types
         end
+        reorder_option_type_dependencies(sorted)
+      end
+
+      # displayOrder alone can put a field ahead of another field it depends on
+      # via dependsOnCode/visibleOnCode (eg. a hidden, optionSource-populated field
+      # with a high displayOrder that a lower displayOrder field is gated on). Move
+      # any depended-upon option type ahead of the option type(s) that depend on it,
+      # preserving displayOrder order otherwise.
+      def self.reorder_option_type_dependencies(option_types)
+        field_key_for = lambda {|it| it['fieldContext'].to_s.empty? ? it['fieldName'].to_s : "#{it['fieldContext']}.#{it['fieldName']}" }
+        depends_on_codes_for = lambda {|option_type|
+          depends_value = option_type['visibleOnCode'].to_s.empty? ? option_type['dependsOnCode'] : option_type['visibleOnCode']
+          next [] if depends_value.to_s.empty? || depends_value == 'networkInterfaces'
+          depends_value = depends_value[(depends_value.index('::') + 2)..-1] if depends_value.include?('::')
+          depends_value.to_s.sub(',', ' ').split(' ').collect {|value| value.split(':')[0] }
+        }
+        result = option_types.dup
+        passes = 0
+        changed = true
+        while changed && passes < result.size
+          changed = false
+          passes += 1
+          result.each_with_index do |option_type, i|
+            depends_on_codes_for.call(option_type).each do |depends_on_code|
+              dep_index = result.index {|it| it['code'] == depends_on_code || field_key_for.call(it) == depends_on_code }
+              if dep_index && dep_index > i
+                result.insert(i, result.delete_at(dep_index))
+                changed = true
+                break
+              end
+            end
+            break if changed
+          end
+        end
+        result
       end
 
       def self.display_select_options(opt, select_options = [], paging = nil)

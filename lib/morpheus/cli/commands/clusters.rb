@@ -7,6 +7,7 @@ class Morpheus::Cli::Clusters
   include Morpheus::Cli::WhoamiHelper
   include Morpheus::Cli::AccountsHelper
   include Morpheus::Cli::ExecutionRequestHelper
+  include Morpheus::Cli::AffinityHelper
 
   register_subcommands :list, :count, :get, :view, :add, :update, :remove, :logs, :history, {:'history-details' => :history_details}, {:'history-event' => :history_event_details}
   register_subcommands :list_types, :get_type
@@ -73,8 +74,11 @@ class Morpheus::Cli::Clusters
       opts.on('--all-labels LABEL', String, "Filter by labels, must match all of the values") do |val|
         add_query_parameter(params, 'allLabels', parse_labels(val))
       end
+      opts.on('--uuid UUID', String, "Filter by uuid, can be passed multiple times to match any of the values") do |val|
+        add_query_parameter(params, 'uuid', val)
+      end
       build_common_options(opts, options, [:list, :query, :json, :yaml, :csv, :fields, :dry_run, :remote])
-      opts.footer = "List clusters."
+      opts.footer = "List clusters.\nFilter by one or more uuids using --uuid UUID."
     end
     optparse.parse!(args)
     if args.count != 0
@@ -148,7 +152,7 @@ class Morpheus::Cli::Clusters
   def get(args)
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
-      opts.banner = subcommand_usage("[id]")
+      opts.banner = subcommand_usage("[cluster]")
       opts.on( nil, '--hosts', "Display masters and workers" ) do
         options[:show_masters] = true
         options[:show_workers] = true
@@ -172,7 +176,7 @@ class Morpheus::Cli::Clusters
         options[:refresh_until_status] = val.to_s.downcase
       end
       build_common_options(opts, options, [:json, :dry_run, :remote])
-      opts.footer = "Get details about a cluster."
+      opts.footer = "Get details about a cluster.\n[cluster] is required. This is the id, name, or uuid of a cluster."
     end
     optparse.parse!(args)
     if args.count < 1
@@ -193,6 +197,8 @@ class Morpheus::Cli::Clusters
       if options[:dry_run]
         if arg.to_s =~ /\A\d{1,}\Z/
           print_dry_run @clusters_interface.dry.get(arg.to_i)
+        elsif cluster_uuid?(arg)
+          print_dry_run @clusters_interface.dry.get(arg.to_s)
         else
           print_dry_run @clusters_interface.dry.list({name:arg})
         end
@@ -5029,9 +5035,15 @@ class Morpheus::Cli::Clusters
   def find_cluster_by_name_or_id(val)
     if val.to_s =~ /\A\d{1,}\Z/
       find_cluster_by_id(val)
+    elsif cluster_uuid?(val)
+      find_cluster_by_uuid(val)
     else
       find_cluster_by_name(val)
     end
+  end
+
+  def cluster_uuid?(val)
+    !!(val.to_s =~ /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i)
   end
 
   def find_cluster_by_id(id)
@@ -5041,6 +5053,22 @@ class Morpheus::Cli::Clusters
       exit 1
     end
     json_results['cluster']
+  end
+
+  def find_cluster_by_uuid(uuid)
+    json_results = @clusters_interface.get(uuid.to_s)
+    if json_results['cluster'].nil? || json_results['cluster'].empty?
+      print_red_alert "Cluster not found by uuid #{uuid}"
+      exit 1
+    end
+    json_results['cluster']
+  rescue RestClient::Exception => e
+    if e.response && e.response.code == 404
+      print_red_alert "Cluster not found by uuid #{uuid}"
+      exit 1
+    else
+      raise e
+    end
   end
 
   def find_cluster_by_name(name)
@@ -5783,15 +5811,10 @@ class Morpheus::Cli::Clusters
     end
   end
 
-   def add_affinity_group_option_types
+  def add_affinity_group_option_types
     [
       {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text', 'required' => true},
-      {'fieldName' => 'affinityType', 'fieldLabel' => 'Type', 'type' => 'select', 'selectOptions' => [
-        {'name' => 'Keep Together (Should)', 'value' => 'KEEP_TOGETHER'},
-        {'name' => 'Keep Separate (Should)', 'value' => 'KEEP_SEPARATE'},
-        {'name' => 'Keep Together (Must)',   'value' => 'KEEP_TOGETHER_MUST'},
-        {'name' => 'Keep Separate (Must)',   'value' => 'KEEP_SEPARATE_MUST'}
-      ], 'description' => 'Choose affinity type.', 'required' => true, 'defaultValue' => 'KEEP_TOGETHER'},
+      affinity_type_option_type(required: true, default: 'KEEP_TOGETHER'),
       {'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox', 'defaultValue' => true},
     ]
   end
@@ -5799,34 +5822,17 @@ class Morpheus::Cli::Clusters
   def update_affinity_group_option_types
     [
       {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text'},
-      {'fieldName' => 'affinityType', 'fieldLabel' => 'Type', 'type' => 'select', 'selectOptions' => [
-        {'name' => 'Keep Together (Should)', 'value' => 'KEEP_TOGETHER'},
-        {'name' => 'Keep Separate (Should)', 'value' => 'KEEP_SEPARATE'},
-        {'name' => 'Keep Together (Must)',   'value' => 'KEEP_TOGETHER_MUST'},
-        {'name' => 'Keep Separate (Must)',   'value' => 'KEEP_SEPARATE_MUST'}
-      ], 'description' => 'Change affinity type.'},
+      affinity_type_option_type,
       {'fieldName' => 'active', 'fieldLabel' => 'Active', 'type' => 'checkbox'},
-      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers', 'searchParameter' => 'phrase', 'description' => 'Select servers to be in the affinity group.'},
+      {'fieldName' => 'servers', 'fieldLabel' => 'Server', 'type' => 'multiTypeahead', 'optionSource' => 'searchServers',
+       'searchParameter' => 'phrase', 'description' => 'Select servers to be in the affinity group.'},
     ]
-  end
-
-  def format_affinity_type(affinity_type)
-    case affinity_type.to_s
-    when 'KEEP_SEPARATE'      then 'Keep Separate'
-    when 'KEEP_TOGETHER'      then 'Keep Together'
-    when 'KEEP_SEPARATE_MUST' then 'Keep Separate (Must)'
-    when 'KEEP_TOGETHER_MUST' then 'Keep Together (Must)'
-    else affinity_type.to_s
-    end
   end
 
   def add_host_vm_group_option_types
     [
       {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text', 'required' => true},
-      {'fieldName' => 'type', 'fieldLabel' => 'Group Type', 'type' => 'select', 'selectOptions' => [
-        {'name' => 'Host Group', 'value' => 'HOST_GROUP'},
-        {'name' => 'VM Group',   'value' => 'VM_GROUP'}
-      ], 'required' => true, 'defaultValue' => 'HOST_GROUP', 'description' => 'Choose group type.'},
+      host_vm_group_type_option_type(required: true, default: 'HOST_GROUP'),
     ]
   end
 
@@ -5834,14 +5840,6 @@ class Morpheus::Cli::Clusters
     [
       {'fieldName' => 'name', 'fieldLabel' => 'Name', 'type' => 'text'},
     ]
-  end
-
-  def format_host_vm_group_type(type)
-    case type.to_s
-    when 'HOST_GROUP' then 'Host Group'
-    when 'VM_GROUP'   then 'VM Group'
-    else type.to_s
-    end
   end
 
   def find_cluster_host_vm_group_by_name_or_id(cluster_id, val)

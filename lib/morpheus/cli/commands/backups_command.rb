@@ -196,7 +196,7 @@ EOT
         plugin_opt_parser.parse!(args)
         v_prompt = Morpheus::Cli::OptionTypes.prompt(plugin_option_type_inputs, options[:options].deep_merge({:context_map => {'domain' => 'backup'}}), @api_client)
         v_prompt.deep_compact!.booleanize! # remove empty values and convert checkbox "on" and "off" to true and false
-        params.merge!(v_prompt.delete('backup'))
+        params.merge!(v_prompt.delete('backup') || {})
 
         # Job / Schedule
         params['jobAction'] = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'jobAction', 'fieldLabel' => 'Backup Job Type', 'type' => 'select', 'optionSource' => 'backupJobActions', 'required' => true, 'defaultValue' => 'new'}], options[:options], @api_client)['jobAction']

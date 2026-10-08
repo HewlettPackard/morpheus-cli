@@ -21,7 +21,13 @@ class Morpheus::ClustersInterface < Morpheus::APIClient
     elsif params.is_a?(Numeric)
       url = "#{base_path}/#{params}"
     elsif params.is_a?(String)
-      headers[:params]['name'] = params
+      # A uuid-shaped string resolves via the path endpoint (/api/clusters/{uuid});
+      # any other string is treated as a name filter for backward compatibility.
+      if params =~ /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
+        url = "#{base_path}/#{params}"
+      else
+        headers[:params]['name'] = params
+      end
     end
     execute(method: :get, url: url, headers: headers)
   end
