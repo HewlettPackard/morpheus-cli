@@ -14,21 +14,21 @@ class Morpheus::HostVmGroupsInterface < Morpheus::APIClient
   def get(id, params={})
     validate_id!(id)
     url = "#{base_path}/#{id}"
-    headers = { params: params, authorization: "******" }
+    headers = { params: params, authorization: "Bearer #{@access_token}" }
     execute(method: :get, url: url, headers: headers)
   end
 
   def update(id, payload)
     validate_id!(id)
     url = "#{base_path}/#{id}"
-    headers = { :authorization => "******", 'Content-Type' => 'application/json' }
+    headers = { :authorization => "Bearer #{@access_token}", 'Content-Type' => 'application/json' }
     execute(method: :put, url: url, headers: headers, payload: payload.to_json)
   end
 
   def destroy(id, params={})
     validate_id!(id)
     url = "#{base_path}/#{id}"
-    headers = { :params => params, :authorization => "******", 'Content-Type' => 'application/json' }
+    headers = { :params => params, :authorization => "Bearer #{@access_token}", 'Content-Type' => 'application/json' }
     execute(method: :delete, url: url, headers: headers)
   end
 
