@@ -152,7 +152,7 @@ class Morpheus::Cli::Clusters
   def get(args)
     options = {}
     optparse = Morpheus::Cli::OptionParser.new do |opts|
-      opts.banner = subcommand_usage("[cluster]")
+      opts.banner = subcommand_usage("[cluster...]")
       opts.on( nil, '--hosts', "Display masters and workers" ) do
         options[:show_masters] = true
         options[:show_workers] = true
@@ -176,7 +176,8 @@ class Morpheus::Cli::Clusters
         options[:refresh_until_status] = val.to_s.downcase
       end
       build_common_options(opts, options, [:json, :dry_run, :remote])
-      opts.footer = "Get details about a cluster.\n[cluster] is required. This is the id, name, or uuid of a cluster."
+      opts.footer = "Get details about one or more clusters.\n" +
+                    "At least one [cluster] is required. Each identifier can be an id, name, or uuid. Supports 1-N [cluster] arguments."
     end
     optparse.parse!(args)
     if args.count < 1
