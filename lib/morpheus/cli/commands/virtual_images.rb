@@ -1249,24 +1249,8 @@ EOT
     publisher_value = marketplace_option['publisher']
 
     # SKU & VERSION
-    if options[:options] && options[:options]['sku'] && options[:options]['version']
-      # the value to match on is actually sku|version
-      options[:options]['sku'] = options[:options]['sku'] + '|' + options[:options]['version']
-    end
     sku_api_params = {'zoneId' => cloud_id, publisher: publisher_value, offer: offer_value}
-    begin
-      v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'sku', 'fieldLabel' => 'Azure Marketplace SKU', 'type' => 'select', 'optionSourceType' => 'azure', 'optionSource' => 'searchAzureMarketplaceSkus', 'required' => true, 'description' => "Select Azure Marketplace SKU and Version, the format is SKU|Version"}], options[:options],@api_client, sku_api_params)
-    rescue => ex
-      Morpheus::Logging::DarkPrinter.puts "Failed to load azure marketplace offers, trying older endpoint" if Morpheus::Logging.debug?
-      v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldName' => 'sku', 'fieldLabel' => 'Azure Marketplace SKU', 'type' => 'select', 'optionSource' => 'searchAzureMarketplaceSkus', 'required' => true, 'description' => "Select Azure Marketplace SKU and Version, the format is SKU|Version"}], options[:options],@api_client, sku_api_params)
-    end
-    # marketplace_option = Morpheus::Cli::OptionTypes.get_last_select()
-    # sku_value = marketplace_option['sku']
-    # version_value = marketplace_option['version']
-    sku_value = v_prompt['sku']
-    if sku_value && sku_value.include?("|")
-      sku_value, version_value = sku_value.split("|")
-    end
+    sku_value, version_value = Morpheus::Cli::OptionTypes.prompt_azure_marketplace_sku_and_version('sku', 'version', options[:options], @api_client, sku_api_params)
 
     rtn['publisher'] = publisher_value
     rtn['offer'] = offer_value
