@@ -18,7 +18,7 @@ Gem::Specification.new do |spec|
   spec.test_files    = spec.files.grep(%r{^(test|spec|features)/})
   spec.require_paths = ["lib"]
 
-  spec.required_ruby_version = '>= 2.5.1' # according to http.rb doc
+  spec.required_ruby_version = '>= 3.0' # according to http.rb doc
   spec.add_dependency "tins", '~> 1.43.0'
   spec.add_dependency "public_suffix", "4.0.7" # https://github.com/weppos/publicsuffix-ruby/blob/main/CHANGELOG.md
   spec.add_dependency "ffi", "1.15.5" # Fix for mismatched deps: https://github.com/ffi/ffi/issues/1103
@@ -30,6 +30,6 @@ Gem::Specification.new do |spec|
   spec.add_dependency "filesize"
   spec.add_dependency 'mime-types'
   spec.add_dependency "http", "5.3.1"
-  spec.add_dependency "rubyzip", '~> 2.3.2'
+  spec.add_dependency "rubyzip", '~> 3.4'
   spec.add_dependency "test-unit"
 end
