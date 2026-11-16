@@ -149,6 +149,30 @@ class Morpheus::ServersInterface < Morpheus::APIClient
     execute(opts)
   end
 
+  # queue a move (migration) of one or more servers, force is passed as a query parameter
+  def bulk_move(ids, payload={}, params={})
+    url = "#{@base_url}/api/servers/bulk-move"
+    headers = { params: params, authorization: "Bearer #{@access_token}", 'Content-Type' => 'application/json' }
+    opts = {method: :put, url: url, headers: headers, payload: payload.merge('ids' => ids).to_json}
+    execute(opts)
+  end
+
+  def attach_volume(id, volume_id, payload={}, params={})
+    validate_id!(volume_id, 'volume_id')
+    url = "#{@base_url}/api/servers/#{id}/volumes/#{CGI::escape(volume_id.to_s)}/attach"
+    headers = { params: params, authorization: "Bearer #{@access_token}", 'Content-Type' => 'application/json' }
+    opts = {method: :put, url: url, headers: headers, payload: payload.to_json}
+    execute(opts)
+  end
+
+  def detach_volume(id, volume_id, params={})
+    validate_id!(volume_id, 'volume_id')
+    url = "#{@base_url}/api/servers/#{id}/volumes/#{CGI::escape(volume_id.to_s)}/detach"
+    headers = { params: params, authorization: "Bearer #{@access_token}", 'Content-Type' => 'application/json' }
+    opts = {method: :put, url: url, headers: headers, payload: {}.to_json}
+    execute(opts)
+  end
+
   def wiki(id, params)
     url = "#{@base_url}/api/servers/#{id}/wiki"
     headers = { params: params, authorization: "Bearer #{@access_token}" }

@@ -601,6 +601,10 @@ class Morpheus::APIClient
     Morpheus::KeyPairsInterface.new(common_interface_options).setopts(@options)
   end
 
+  def key_providers
+    Morpheus::KeyProvidersInterface.new(common_interface_options).setopts(@options)
+  end
+
   def distributed_workers
     Morpheus::DistributedWorkersInterface.new(common_interface_options).setopts(@options)
   end
