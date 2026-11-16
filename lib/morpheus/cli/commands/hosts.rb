@@ -15,6 +15,7 @@ class Morpheus::Cli::Hosts
                        :wiki, :update_wiki,
                        :maintenance, :leave_maintenance, :placement,
                        :list_devices, :assign_device, :detach_device, :attach_device,
+                       :attach_volume, :detach_volume, :move,
                        :snapshot, :create_linked_clone
   alias_subcommand :details, :get
   set_default_subcommand :list
@@ -2449,6 +2450,117 @@ EOT
     end
   end
 
+
+  def move(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[host...] --target-cluster CLUSTER")
+      add_move_options(opts, options)
+      build_standard_update_options(opts, options, [:auto_confirm])
+      opts.footer = <<-EOT
+Move (migrate) hosts to another cluster or host. The move is queued and runs in the background.
+[host] is required. This is the name or id of a host. Supports 1-N [host] arguments.
+Moving an encrypted VM to another cluster requires an active key provider in the target cluster
+that you are allowed to select.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, min:1)
+    if options[:payload].nil? && options[:target_cluster].to_s.empty?
+      raise_command_error "--target-cluster is required.\n#{optparse}"
+    end
+    connect(options)
+
+    hosts = parse_id_list(args).collect { |host_id| find_host_by_name_or_id(host_id) }
+    return 1 if hosts.any?(&:nil?)
+    payload = options[:payload] || build_move_payload(options)
+    payload.deep_merge!(parse_passed_options(options))
+    params = options[:force] ? {'force' => true} : {}
+
+    objects_label = "#{hosts.size == 1 ? 'host' : (hosts.size.to_s + ' hosts')} #{anded_list(hosts.collect {|it| it['name'] })}"
+    target_label = options[:target_cluster] ? " to cluster #{options[:target_cluster]}" : ""
+    confirm!("Are you sure you would like to move #{objects_label}#{target_label}?", options)
+
+    @servers_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @servers_interface.dry.bulk_move(hosts.collect {|it| it['id'] }, payload, params)
+      return 0, nil
+    end
+    json_response = @servers_interface.bulk_move(hosts.collect {|it| it['id'] }, payload, params)
+    render_response(json_response, options) do
+      print_green_success(json_response['msg'] || "Queued #{objects_label} for move")
+    end
+    return 0, nil
+  end
+
+  def attach_volume(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[host] [volume]")
+      build_standard_update_options(opts, options)
+      opts.footer = <<-EOT
+Attach an existing storage volume to a host. The attach is queued and runs in the background.
+[host] is required. This is the name or id of a host.
+[volume] is required. This is the id or uuid of a storage volume that is not attached elsewhere.
+Use -O rootVolume=true to attach it as the root volume.
+An encrypted volume's key is registered on the host as part of the attach.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:2)
+    connect(options)
+
+    server = find_host_by_name_or_id(args[0])
+    return 1 if server.nil?
+    payload = options[:payload] || {}
+    payload.deep_merge!(parse_passed_options(options))
+
+    @servers_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @servers_interface.dry.attach_volume(server['id'], args[1], payload)
+      return 0, nil
+    end
+    json_response = @servers_interface.attach_volume(server['id'], args[1], payload)
+    render_response(json_response, options) do
+      print_green_success "Attaching volume #{args[1]} to host #{server['name']}"
+    end
+    return 0, nil
+  end
+
+  def detach_volume(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[host] [volume]")
+      opts.on('--force', "Force the detach") do
+        options[:force] = true
+      end
+      build_standard_update_options(opts, options, [:auto_confirm])
+      opts.footer = <<-EOT
+Detach a storage volume from a host. The detach is queued and runs in the background.
+[host] is required. This is the name or id of a host.
+[volume] is required. This is the id or uuid of a storage volume attached to the host.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, count:2)
+    connect(options)
+
+    server = find_host_by_name_or_id(args[0])
+    return 1 if server.nil?
+    params = options[:force] ? {'force' => true} : {}
+    confirm!("Are you sure you would like to detach volume #{args[1]} from host '#{server['name']}'?", options)
+
+    @servers_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @servers_interface.dry.detach_volume(server['id'], args[1], params)
+      return 0, nil
+    end
+    json_response = @servers_interface.detach_volume(server['id'], args[1], params)
+    render_response(json_response, options) do
+      print_green_success "Detaching volume #{args[1]} from host #{server['name']}"
+    end
+    return 0, nil
+  end
 
   def maintenance(args)
     options = {}

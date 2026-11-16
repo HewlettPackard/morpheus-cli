@@ -16,7 +16,7 @@ class Morpheus::Cli::Instances
                        :cancel_removal, :cancel_expiration, :cancel_shutdown, :extend_expiration, :extend_shutdown, :remove_from_control,
                        :history, {:'history-details' => :history_details}, {:'history-event' => :history_event_details}, 
                        :logs, :stats, :stop, :start, :restart, :actions, :action, :suspend, :eject, :stop_service, :start_service, :restart_service, 
-                       :backup, :backups, :resize, :clone, :envs, :setenv, :delenv, 
+                       :backup, :backups, :resize, :clone, :move, :envs, :setenv, :delenv,
                        :lock, :unlock, :clone_image,
                        :security_groups, :apply_security_groups, :run_workflow,
                        :import_snapshot, :snapshot, :snapshots, :revert_to_snapshot, :remove_all_snapshots, :remove_all_container_snapshots, :create_linked_clone,
@@ -2908,6 +2908,48 @@ class Morpheus::Cli::Instances
       print green, "Action #{action_display_name} performed on #{id_list.size == 1 ? 'instance' : 'instances'} #{anded_list(id_list)}", reset, "\n"
     end
     return 0
+  end
+
+  def move(args)
+    options = {}
+    optparse = Morpheus::Cli::OptionParser.new do |opts|
+      opts.banner = subcommand_usage("[instance...] --target-cluster CLUSTER")
+      add_move_options(opts, options)
+      build_standard_update_options(opts, options, [:auto_confirm])
+      opts.footer = <<-EOT
+Move (migrate) the servers behind instances to another cluster or host. The move is queued and runs in the background.
+[instance] is required. This is the name or id of an instance. Supports 1-N [instance] arguments.
+Moving an encrypted VM to another cluster requires an active key provider in the target cluster
+that you are allowed to select.
+EOT
+    end
+    optparse.parse!(args)
+    verify_args!(args:args, optparse:optparse, min:1)
+    if options[:payload].nil? && options[:target_cluster].to_s.empty?
+      raise_command_error "--target-cluster is required.\n#{optparse}"
+    end
+    connect(options)
+
+    instances = parse_id_list(args).collect { |instance_id| find_instance_by_name_or_id(instance_id) }
+    return 1 if instances.any?(&:nil?)
+    payload = options[:payload] || build_move_payload(options)
+    payload.deep_merge!(parse_passed_options(options))
+    params = options[:force] ? {'force' => true} : {}
+
+    objects_label = "#{instances.size == 1 ? 'instance' : (instances.size.to_s + ' instances')} #{anded_list(instances.collect {|it| it['name'] })}"
+    target_label = options[:target_cluster] ? " to cluster #{options[:target_cluster]}" : ""
+    confirm!("Are you sure you would like to move #{objects_label}#{target_label}?", options)
+
+    @instances_interface.setopts(options)
+    if options[:dry_run]
+      print_dry_run @instances_interface.dry.bulk_move(instances.collect {|it| it['id'] }, payload, params)
+      return 0, nil
+    end
+    json_response = @instances_interface.bulk_move(instances.collect {|it| it['id'] }, payload, params)
+    render_response(json_response, options) do
+      print_green_success(json_response['msg'] || "Queued #{objects_label} for move")
+    end
+    return 0, nil
   end
 
   def resize(args)
