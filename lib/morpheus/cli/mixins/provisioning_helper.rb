@@ -1216,6 +1216,7 @@ module Morpheus::Cli::ProvisioningHelper
       volume['storageProfile'] = v_prompt[field_context]['storageProfile'] if v_prompt[field_context] && !v_prompt[field_context]['storageProfile'].to_s.empty?
     end
 
+    apply_volume_encryption(volume, field_context, options)
     volumes << volume
 
     if plan_info['addVolumes']
@@ -1290,6 +1291,7 @@ module Morpheus::Cli::ProvisioningHelper
           volume['storageProfile'] = v_prompt[field_context]['storageProfile'] if v_prompt[field_context] && !v_prompt[field_context]['storageProfile'].to_s.empty?
         end
       
+        apply_volume_encryption(volume, field_context, options)
         volumes << volume
 
         volume_index += 1
@@ -1449,6 +1451,7 @@ module Morpheus::Cli::ProvisioningHelper
       v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'storageProfile', 'type' => 'select', 'fieldLabel' => 'Root Storage Profile', 'selectOptions' => storage_profiles, 'required' => false, 'description' => 'Choose a storage profile.', 'defaultValue' => volume['storageProfile']}], options[:options])
       volume['storageProfile'] = v_prompt[field_context]['storageProfile'] if v_prompt[field_context] && !v_prompt[field_context]['storageProfile'].to_s.empty?
     end
+    apply_volume_encryption(volume, field_context, options)
     volumes << volume
 
     # modify or delete existing data volumes
@@ -1481,6 +1484,7 @@ module Morpheus::Cli::ProvisioningHelper
           if !current_volume['storageProfile'].to_s.empty?
             volume['storageProfile'] = current_volume['storageProfile']
           end
+          apply_volume_encryption(volume, field_context, options)
           volumes << volume
         else
           # v_prompt = Morpheus::Cli::OptionTypes.prompt([{'fieldContext' => field_context, 'fieldName' => 'storageType', 'type' => 'select', 'fieldLabel' => "Disk #{volume_index} Storage Type", 'selectOptions' => storage_types, 'required' => true, 'skipSingleOption' => true, 'description' => 'Choose a storage type.'}], options[:options])
@@ -1544,6 +1548,7 @@ module Morpheus::Cli::ProvisioningHelper
             volume['storageProfile'] = v_prompt[field_context]['storageProfile'] if v_prompt[field_context] && !v_prompt[field_context]['storageProfile'].to_s.empty?
           end
 
+          apply_volume_encryption(volume, field_context, options)
           volumes << volume
 
         end
@@ -1621,6 +1626,7 @@ module Morpheus::Cli::ProvisioningHelper
           volume['storageProfile'] = v_prompt[field_context]['storageProfile'] if v_prompt[field_context] && !v_prompt[field_context]['storageProfile'].to_s.empty?
         end
 
+        apply_volume_encryption(volume, field_context, options)
         volumes << volume
 
         # todo: should maxDisk check consider the root volume too?
@@ -1674,6 +1680,107 @@ module Morpheus::Cli::ProvisioningHelper
       end
     end
     return service_plan
+  end
+
+  # Sets volume['encrypted'] from -O <field_context>.encrypted=true (or the volume's own value).
+  # The API needs a JSON boolean and decides whether the volume can be encrypted, so nothing is sent unless asked.
+  def apply_volume_encryption(volume, field_context, options={})
+    passed = nil
+    if options[:options] && options[:options][field_context].is_a?(Hash)
+      passed = options[:options][field_context]['encrypted']
+    end
+    passed = volume['encrypted'] if passed.nil?
+    encrypted = parse_volume_encrypted(passed, "#{field_context}.encrypted")
+    if encrypted.nil?
+      volume.delete('encrypted')
+    else
+      volume['encrypted'] = encrypted
+    end
+    volume
+  end
+
+  def parse_volume_encrypted(value, label)
+    return nil if value.nil? || value.to_s.strip.empty?
+    return value if value == true || value == false
+    case value.to_s.strip.downcase
+    when 'true', 'on', 'yes', '1'
+      true
+    when 'false', 'off', 'no', '0'
+      false
+    else
+      raise_command_error "Invalid value '#{value}' for #{label}, expected true or false."
+    end
+  end
+
+  # Options shared by `hosts move` and `instances move`.
+  def add_move_options(opts, options)
+    opts.on('--target-cluster CLUSTER', String, "Target cluster name or ID. Required unless a payload is passed.") do |val|
+      options[:target_cluster] = val
+    end
+    opts.on('--target-host HOST', String, "Target host name or ID within the target cluster. A host is selected automatically by default.") do |val|
+      options[:target_host] = val
+    end
+    opts.on('--datastore-map MAP', String, "Datastore mapping of source ID to target ID, comma separated. eg. 12=34,13=35") do |val|
+      options[:datastore_map] = parse_move_id_map(val, 'datastore-map')
+    end
+    opts.on('--network-map MAP', String, "Network mapping of source ID to target ID, comma separated. eg. 3=9") do |val|
+      options[:network_map] = parse_move_id_map(val, 'network-map')
+    end
+    opts.on('--migration-timeout SECONDS', Integer, "Per VM timeout for a live migration in seconds. Default is 6000.") do |val|
+      options[:migration_timeout] = val
+    end
+    opts.on('--cpu-throttling [on|off]', String, "Throttle VM CPU so a live migration can converge.") do |val|
+      options[:cpu_throttling] = !['false', 'off', '0'].include?(val.to_s.downcase)
+    end
+    opts.on('--force', "Override soft validation blocks, such as a storage migration of a VM with snapshots.") do
+      options[:force] = true
+    end
+  end
+
+  def parse_move_id_map(val, label)
+    map = {}
+    val.to_s.split(',').each do |pair|
+      source, target = pair.split('=', 2).collect { |it| it.to_s.strip }
+      unless source =~ /\A\d+\z/ && target =~ /\A\d+\z/
+        raise_command_error "Invalid --#{label} entry '#{pair.strip}', expected SOURCE_ID=TARGET_ID."
+      end
+      map[source] = target.to_i
+    end
+    raise_command_error "--#{label} needs at least one SOURCE_ID=TARGET_ID entry." if map.empty?
+    map
+  end
+
+  # Resolves the move target cluster by name or id.
+  def find_move_target_cluster(val)
+    clusters = api_client.clusters
+    if val.to_s =~ /\A\d+\z/
+      cluster = nil
+      begin
+        cluster = clusters.get(val.to_i)['cluster']
+      rescue RestClient::Exception => e
+        raise e unless e.response && e.response.code == 404
+      end
+      raise_command_error "Cluster not found by id #{val}" if cluster.nil? || cluster.empty?
+      return cluster
+    end
+    matches = clusters.list({name: val.to_s})['clusters'] || []
+    exact = matches.select { |it| it['name'] == val.to_s }
+    matches = exact if exact.size == 1
+    raise_command_error "Cluster not found by name #{val}" if matches.empty?
+    raise_command_error "#{matches.size} clusters exist with the name #{val}. Try using id instead." if matches.size > 1
+    matches[0]
+  end
+
+  # Builds the move request body from the --target-* options.
+  def build_move_payload(options)
+    cluster = find_move_target_cluster(options[:target_cluster])
+    payload = {'targetClusterId' => cluster['id']}
+    payload['targetHostId'] = find_host_by_name_or_id(options[:target_host])['id'] if options[:target_host]
+    payload['datastoreMap'] = options[:datastore_map] if options[:datastore_map]
+    payload['networkMap'] = options[:network_map] if options[:network_map]
+    payload['migrationTimeout'] = options[:migration_timeout] if options[:migration_timeout]
+    payload['enableCpuThrottling'] = options[:cpu_throttling] unless options[:cpu_throttling].nil?
+    payload
   end
 
   def get_volume_size(volume)

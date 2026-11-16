@@ -167,6 +167,14 @@ class Morpheus::InstancesInterface < Morpheus::APIClient
     execute(opts)
   end
 
+  # queue a move (migration) of the servers behind one or more instances, force is passed as a query parameter
+  def bulk_move(ids, payload={}, params={})
+    url = "#{@base_url}/api/instances/bulk-move"
+    headers = { params: params, authorization: "Bearer #{@access_token}", 'Content-Type' => 'application/json' }
+    opts = {method: :put, url: url, headers: headers, payload: payload.merge('ids' => ids).to_json}
+    execute(opts)
+  end
+
   def workflow(id,task_set_id,payload)
     url = "#{@base_url}/api/instances/#{id}/workflow"
     headers = { :params => {:workflowId => task_set_id},:authorization => "Bearer #{@access_token}", 'Content-Type' => 'application/json' }
