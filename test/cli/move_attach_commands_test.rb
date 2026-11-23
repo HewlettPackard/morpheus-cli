@@ -26,9 +26,10 @@ class MoveAttachCommandsTest < Test::Unit::TestCase
       {key => (@records[:by_id] || {}).fetch(id.to_i) { raise "unexpected get(#{id.inspect})" }}
     end
 
+    # mirrors the API name filter: an exact match that is case-insensitive under the default MySQL collation
     def list(params={})
       key = @records[:many]
-      {key => (@records[:all] || []).select { |it| params[:name].nil? || it['name'].include?(params[:name]) }}
+      {key => (@records[:all] || []).select { |it| params[:name].nil? || it['name'].casecmp?(params[:name].to_s) }}
     end
 
     def bulk_move(ids, payload, params)
@@ -64,7 +65,7 @@ class MoveAttachCommandsTest < Test::Unit::TestCase
         all: [{'id' => 1, 'name' => 'web-1'}])
       @clusters = FakeInterface.new(one: 'cluster', many: 'clusters',
         by_id: {3 => {'id' => 3, 'name' => 'cluster-a'}},
-        all: [{'id' => 5, 'name' => 'cluster-b'}, {'id' => 6, 'name' => 'cluster-b-dr'}])
+        all: [{'id' => 5, 'name' => 'cluster-b'}, {'id' => 6, 'name' => 'Cluster-B'}])
     end
   end
 
@@ -163,10 +164,19 @@ class MoveAttachCommandsTest < Test::Unit::TestCase
     assert_equal [7, 8], @api.servers.calls[0][1]
   end
 
-  def test_move_prefers_an_exact_cluster_name_over_a_partial_match
+  def test_move_prefers_the_cluster_name_that_matches_exactly
     run_capturing_output { command(Morpheus::Cli::Hosts).move(['7', '--target-cluster', 'cluster-b', '-y']) }
 
     assert_equal 5, @api.servers.calls[0][2]['targetClusterId']
+  end
+
+  def test_move_rejects_an_ambiguous_cluster_name
+    error = assert_raise(Morpheus::Cli::CommandError) do
+      command(Morpheus::Cli::Hosts).move(['7', '--target-cluster', 'CLUSTER-B', '-y'])
+    end
+
+    assert_match(/2 clusters exist with the name CLUSTER-B/, error.message)
+    assert_empty @api.servers.calls
   end
 
   def test_move_with_a_payload_needs_no_target_cluster_option
@@ -211,6 +221,45 @@ class MoveAttachCommandsTest < Test::Unit::TestCase
     run_capturing_output { command(Morpheus::Cli::Instances).move(['1', '2', '--target-cluster', '3', '-y']) }
 
     assert_equal [1, 2], @api.instances.calls[0][1]
+  end
+
+  def test_storage_migration_needs_no_target_cluster
+    run_capturing_output do
+      command(Morpheus::Cli::Hosts).move(['7', '--migration-mode', 'storage', '--datastore-map', '12=34', '-y'])
+    end
+
+    assert_equal [[:bulk_move, [7], {'migrationMode' => 'storage', 'datastoreMap' => {'12' => 34}}, {}]], @api.servers.calls
+  end
+
+  def test_storage_migration_requires_a_datastore_map
+    error = assert_raise(Morpheus::Cli::CommandError) do
+      command(Morpheus::Cli::Instances).move(['1', '--migration-mode', 'storage', '-y'])
+    end
+
+    assert_match(/--datastore-map is required/, error.message)
+    assert_empty @api.instances.calls
+  end
+
+  def test_compute_and_combined_migrations_still_require_a_target_cluster
+    error = assert_raise(Morpheus::Cli::CommandError) do
+      command(Morpheus::Cli::Hosts).move(['7', '--migration-mode', 'combined', '--datastore-map', '12=34', '-y'])
+    end
+
+    assert_match(/--target-cluster is required/, error.message)
+  end
+
+  def test_instance_move_sends_the_migration_mode
+    run_capturing_output do
+      command(Morpheus::Cli::Instances).move(['1', '--migration-mode', 'combined', '--target-cluster', '3', '-y'])
+    end
+
+    assert_equal [[:bulk_move, [1], {'migrationMode' => 'combined', 'targetClusterId' => 3}, {}]], @api.instances.calls
+  end
+
+  def test_move_rejects_an_unknown_migration_mode
+    assert_raise(OptionParser::InvalidArgument) do
+      command(Morpheus::Cli::Hosts).move(['7', '--migration-mode', 'live', '--target-cluster', '3', '-y'])
+    end
   end
 
   def test_attach_volume_requires_a_host_and_a_volume

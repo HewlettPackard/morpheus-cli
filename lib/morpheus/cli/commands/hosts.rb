@@ -815,6 +815,8 @@ class Morpheus::Cli::Hosts
         options[:refresh_interval] = val.to_s.empty? ? default_refresh_interval : val.to_f
       end
       build_common_options(opts, options, [:options, :payload, :json, :dry_run, :quiet, :remote])
+      opts.footer = "Add a host.\n" +
+                    "On an HVM cluster with an active key provider, encrypt volumes with -O rootVolume.encrypted=true and -O dataVolumeN.encrypted=true."
     end
     optparse.parse!(args)
     connect(options)
@@ -1361,6 +1363,10 @@ class Morpheus::Cli::Hosts
         options[:options]['storageController'] = JSON.parse(val)
       end
       build_common_options(opts, options, [:options, :json, :dry_run, :quiet, :remote])
+      opts.footer = "Resize (reconfigure) a host.\n" +
+                    "[name] is required. This is the name or id of a host.\n" +
+                    "On an HVM cluster with an active key provider, encrypt a new volume with -O dataVolumeN.encrypted=true.\n" +
+                    "The encryption of an existing volume cannot be changed."
     end
     optparse.parse!(args)
     if args.count < 1
@@ -2462,13 +2468,13 @@ Move (migrate) hosts to another cluster or host. The move is queued and runs in 
 [host] is required. This is the name or id of a host. Supports 1-N [host] arguments.
 Moving an encrypted VM to another cluster requires an active key provider in the target cluster
 that you are allowed to select.
+Use --migration-mode storage with --datastore-map to move disks to other datastores on the same host.
+Encrypted disks can only move to encryption-capable datastores.
 EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, min:1)
-    if options[:payload].nil? && options[:target_cluster].to_s.empty?
-      raise_command_error "--target-cluster is required.\n#{optparse}"
-    end
+    verify_move_options!(options, optparse)
     connect(options)
 
     hosts = parse_id_list(args).collect { |host_id| find_host_by_name_or_id(host_id) }

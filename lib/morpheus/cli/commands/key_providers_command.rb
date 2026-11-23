@@ -128,7 +128,9 @@ class Morpheus::Cli::KeyProvidersCommand
       build_standard_update_options(opts, options)
       opts.footer = <<~TEXT
         Update a key provider by its numeric database ID.
-        Use --status active --export-id ID to confirm its latest export.
+        Use --status active --export-id ID to confirm its latest export, which activates it.
+        Use --status disabled to disable an active provider, and --status active to enable a disabled one.
+        Use promote to make a disabled provider replace the active provider of its scope.
       TEXT
     end
     optparse.parse!(args)
@@ -348,20 +350,26 @@ class Morpheus::Cli::KeyProvidersCommand
       opts.on('--name NAME', String, 'Override the imported provider name.') do |value|
         fields['name'] = value
       end
-      opts.on('--ref-type TYPE', String, 'Set the imported provider scope type.') do |value|
+      opts.on('--ref-type TYPE', String, 'Scope type of the imported provider. Default is ComputeServerGroup when --ref-id is passed.') do |value|
         fields['refType'] = value
       end
-      opts.on('--ref-id ID', String, 'Set the imported provider scope ID.') do |value|
+      opts.on('--ref-id ID', String, 'Scope ID of the imported provider, such as the numeric cluster ID.') do |value|
         fields['refId'] = value
       end
       opts.on('--visibility VALUE', String, 'Set the imported provider visibility.') do |value|
         fields['visibility'] = value
       end
       build_common_options(opts, options, [:json, :quiet, :dry_run, :remote])
-      opts.footer = 'Import a passphrase-encrypted key-provider export file.'
+      opts.footer = <<~TEXT
+        Import a passphrase-encrypted key-provider export file.
+        With --ref-id the provider becomes the active provider for that cluster; the import is
+        refused if the cluster already has an active provider.
+      TEXT
     end
     optparse.parse!(args)
     verify_args!(args: args, optparse: optparse, count: 1)
+    # the API refuses a scope ID without a scope type
+    fields['refType'] ||= 'ComputeServerGroup' if fields['refId']
     local_file = File.expand_path(args[0])
     raise_command_error "Key-provider export file not found or unreadable: #{args[0]}" unless File.file?(local_file) && File.readable?(local_file)
     connect(options)
@@ -492,12 +500,25 @@ class Morpheus::Cli::KeyProvidersCommand
       'Status' => 'status',
       'Visibility' => 'visibility',
       'Scope' => lambda { |item| item['refType'] ? "#{item['refType']}:#{item['refId']}" : '' },
+      'TPM Required' => lambda { |item| item.key?('tpmRequired') ? format_boolean(item['tpmRequired']) : '' },
       'Pending Version' => 'pendingVersion',
       'Active Version' => 'activeVersion',
       'Exported Date' => lambda { |item| format_local_dt(item['exportedDate']) },
       'Host Count' => 'hostCount',
       'VM Count' => 'vmCount'
     }, provider)
+    key_versions = provider['keyVersions'] || []
+    unless key_versions.empty?
+      print_h2 'Key Versions', [], options
+      rows = key_versions.collect do |version|
+        {
+          keyVersion: version['keyVersion'],
+          status: version['status'],
+          created: format_local_dt(version['dateCreated'])
+        }
+      end
+      print as_pretty_table(rows, [:keyVersion, :status, :created], options)
+    end
     locations = provider['locations'] || []
     unless locations.empty?
       print_h2 'Host KDK Locations', [], options

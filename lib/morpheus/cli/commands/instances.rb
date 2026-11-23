@@ -514,7 +514,8 @@ class Morpheus::Cli::Instances
       build_standard_add_options(opts, options) #, [:options, :payload, :json, :dry_run, :remote, :quiet])
       opts.footer = "Create a new instance." + "\n" +
                     "[name] is required. This is the new instance name." + "\n" +
-                    "The available options vary by --type."
+                    "The available options vary by --type." + "\n" +
+                    "On an HVM cluster with an active key provider, encrypt volumes with -O rootVolume.encrypted=true and -O dataVolumeN.encrypted=true."
     end
 
     optparse.parse!(args)
@@ -2921,13 +2922,13 @@ Move (migrate) the servers behind instances to another cluster or host. The move
 [instance] is required. This is the name or id of an instance. Supports 1-N [instance] arguments.
 Moving an encrypted VM to another cluster requires an active key provider in the target cluster
 that you are allowed to select.
+Use --migration-mode storage with --datastore-map to move disks to other datastores on the same host.
+Encrypted disks can only move to encryption-capable datastores.
 EOT
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, min:1)
-    if options[:payload].nil? && options[:target_cluster].to_s.empty?
-      raise_command_error "--target-cluster is required.\n#{optparse}"
-    end
+    verify_move_options!(options, optparse)
     connect(options)
 
     instances = parse_id_list(args).collect { |instance_id| find_instance_by_name_or_id(instance_id) }
@@ -2964,6 +2965,10 @@ EOT
         options[:options]['storageController'] = JSON.parse(val)
       end
       build_standard_update_options(opts, options)
+      opts.footer = "Resize (reconfigure) an instance.\n" +
+                    "[instance] is required. This is the name or id of an instance.\n" +
+                    "On an HVM cluster with an active key provider, encrypt a new volume with -O dataVolumeN.encrypted=true.\n" +
+                    "The encryption of an existing volume cannot be changed."
     end
     optparse.parse!(args)
     verify_args!(args:args, optparse:optparse, count:1)

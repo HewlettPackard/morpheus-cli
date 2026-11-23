@@ -1714,7 +1714,10 @@ module Morpheus::Cli::ProvisioningHelper
 
   # Options shared by `hosts move` and `instances move`.
   def add_move_options(opts, options)
-    opts.on('--target-cluster CLUSTER', String, "Target cluster name or ID. Required unless a payload is passed.") do |val|
+    opts.on('--migration-mode MODE', ['compute', 'storage', 'combined'], "Migration mode: compute, storage or combined. storage moves disks to other datastores on the current host, using --datastore-map without --target-cluster.") do |val|
+      options[:migration_mode] = val
+    end
+    opts.on('--target-cluster CLUSTER', String, "Target cluster name or ID. Required unless a payload is passed or --migration-mode is storage.") do |val|
       options[:target_cluster] = val
     end
     opts.on('--target-host HOST', String, "Target host name or ID within the target cluster. A host is selected automatically by default.") do |val|
@@ -1771,10 +1774,21 @@ module Morpheus::Cli::ProvisioningHelper
     matches[0]
   end
 
-  # Builds the move request body from the --target-* options.
+  # A storage migration keeps the current host, so it needs a datastore map instead of a target cluster.
+  def verify_move_options!(options, optparse)
+    return if options[:payload]
+    if options[:migration_mode] == 'storage'
+      raise_command_error "--datastore-map is required when --migration-mode is storage.\n#{optparse}" if options[:datastore_map].nil?
+    elsif options[:target_cluster].to_s.empty?
+      raise_command_error "--target-cluster is required.\n#{optparse}"
+    end
+  end
+
+  # Builds the move request body from the --migration-mode and --target-* options.
   def build_move_payload(options)
-    cluster = find_move_target_cluster(options[:target_cluster])
-    payload = {'targetClusterId' => cluster['id']}
+    payload = {}
+    payload['migrationMode'] = options[:migration_mode] if options[:migration_mode]
+    payload['targetClusterId'] = find_move_target_cluster(options[:target_cluster])['id'] if options[:target_cluster]
     payload['targetHostId'] = find_host_by_name_or_id(options[:target_host])['id'] if options[:target_host]
     payload['datastoreMap'] = options[:datastore_map] if options[:datastore_map]
     payload['networkMap'] = options[:network_map] if options[:network_map]
