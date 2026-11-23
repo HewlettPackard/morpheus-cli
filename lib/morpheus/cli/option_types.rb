@@ -1392,24 +1392,10 @@ module Morpheus
         publisher_value = marketplace_option['publisher']
 
         # SKU & VERSION
-        if options && options['marketplaceSku'] && options['marketplaceVersion']
-          # the value to match on is actually sku|version
-          options['marketplaceSku'] = options['marketplaceSku'] + '|' + options['marketplaceVersion']
-        end
         sku_api_params = {'zoneId' => cloud_id, publisher: publisher_value, offer: offer_value}
-        begin
-          v_prompt = prompt([{'fieldName' => 'marketplaceSku', 'fieldLabel' => 'Azure Marketplace SKU', 'type' => 'select', 'optionSourceType' => 'azure', 'optionSource' => 'searchAzureMarketplaceSkus', 'required' => true, 'description' => "Select Azure Marketplace SKU and Version, the format is SKU|Version"}], options,api_client, sku_api_params)
-        rescue => ex
-          Morpheus::Logging::DarkPrinter.puts "Failed to load azure marketplace offers, trying older endpoint" if Morpheus::Logging.debug?
-          v_prompt = prompt([{'fieldName' => 'marketplaceSku', 'fieldLabel' => 'Azure Marketplace SKU', 'type' => 'select', 'optionSource' => 'searchAzureMarketplaceSkus', 'required' => true, 'description' => "Select Azure Marketplace SKU and Version, the format is SKU|Version"}], options,api_client, sku_api_params)
-        end
-        # marketplace_option = Morpheus::Cli::OptionTypes.get_last_select()
-        # sku_value = marketplace_option['sku']
-        # version_value = marketplace_option['version']
-        sku_value = v_prompt['marketplaceSku']
-        if sku_value && sku_value.include?("|")
-          sku_value, version_value = sku_value.split("|")
-        end
+        resource_pool_id = api_params['resourcePoolId'] || api_params[:resourcePoolId]
+        sku_api_params['resourcePoolId'] = resource_pool_id if resource_pool_id
+        sku_value, version_value = prompt_azure_marketplace_sku_and_version('marketplaceSku', 'marketplaceVersion', options, api_client, sku_api_params)
         # rtn['publisher'] = publisher_value
         # rtn['offer'] = offer_value
         # rtn['sku'] = sku_value
@@ -1417,6 +1403,38 @@ module Morpheus
         # return rtn
         # instance provisioning expects these parameters...
         return {'marketplacePublisher' => publisher_value, 'marketplaceOffer' => offer_value, 'marketplaceSku' => sku_value, 'marketplaceVersion' => version_value}
+      end
+
+      # Prompts for an Azure Marketplace SKU and then its version.
+      # A combined SKU|Version value is still accepted and split into the two fields.
+      # Older appliances list each SKU and version together as a single SKU|Version option.
+      def self.prompt_azure_marketplace_sku_and_version(sku_field, version_field, options, api_client, api_params)
+        options ||= {}
+        sku_value, version_value = options[sku_field], options[version_field]
+        if sku_value.to_s.include?('|')
+          sku_value, version_value = sku_value.to_s.split('|', 2)
+        end
+        source_type = 'azure'
+        begin
+          sku_options = load_source_options('searchAzureMarketplaceSkus', source_type, api_client, api_params)
+        rescue => ex
+          Morpheus::Logging::DarkPrinter.puts "Failed to load azure marketplace skus, trying older endpoint" if Morpheus::Logging.debug?
+          source_type = nil
+          sku_options = load_source_options('searchAzureMarketplaceSkus', source_type, api_client, api_params)
+        end
+        sku_option_type = {'fieldName' => sku_field, 'fieldLabel' => 'Azure Marketplace SKU', 'type' => 'select', 'selectOptions' => sku_options || [], 'required' => true}
+        if (sku_options || []).any? {|it| it['value'].to_s.include?('|') }
+          options[sku_field] = "#{sku_value}|#{version_value}" if sku_value && version_value
+          sku_option_type['description'] = "Select Azure Marketplace SKU and Version, the format is SKU|Version"
+          return prompt([sku_option_type], options, api_client, api_params)[sku_field].to_s.split('|', 2)
+        end
+        options[sku_field] = sku_value if sku_value
+        sku_option_type['description'] = "Select Azure Marketplace SKU."
+        sku_value = prompt([sku_option_type], options, api_client, api_params)[sku_field]
+        options[version_field] = version_value if version_value
+        version_option_type = {'fieldName' => version_field, 'fieldLabel' => 'Azure Marketplace Version', 'type' => 'select', 'optionSourceType' => 'azure', 'optionSource' => 'searchAzureMarketplaceVersions', 'required' => true, 'defaultFirstOption' => true, 'description' => "Select Azure Marketplace Version. The newest version is listed first."}
+        version_value = prompt([version_option_type], options, api_client, api_params.merge(sku: sku_value))[version_field]
+        return sku_value, version_value
       end
 
       def self.load_options(option_type, api_client, api_params, query_value=nil)

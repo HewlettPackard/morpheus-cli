@@ -48,6 +48,21 @@ class ClustersUuidTest < Test::Unit::TestCase
     @uuid = 'a1b2c3d4-e5f6-4711-8899-0011223344ff'
   end
 
+  def test_get_help_documents_multiple_cluster_identifiers
+    command, clusters = build_command
+    output = capture_stdout do
+      error = assert_raise(SystemExit) { command.get(['--help']) }
+      assert_equal 0, error.status
+    end
+    assert_match(/Usage: morpheus clusters get \[cluster\.\.\.\]/, output)
+    assert_include output, 'Get details about one or more clusters.'
+    assert_include output, 'At least one [cluster] is required.'
+    assert_include output, 'Each identifier can be an id, name, or uuid.'
+    assert_include output, 'Supports 1-N [cluster] arguments.'
+    assert_empty clusters.get_calls
+    assert_empty clusters.list_calls
+  end
+
   ## find_cluster_by_name_or_id dispatch
 
   def test_uuid_resolves_via_path_get_not_name_list
